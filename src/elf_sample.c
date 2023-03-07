@@ -1,9 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include "elf_structs.h"
 
 #define HEADER_FILE_SIZE 16
 #define HEADERX_FILE_SIZE 48
+#define PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE 56
 
 int parseHeader(FILE *file, struct Header *header) {
     char buffer[HEADER_FILE_SIZE];
@@ -76,6 +78,25 @@ int parseHeaderX(FILE *file, struct HeaderX *headerX) {
     return 0;
 }
 
+int parseProgramEntry(FILE *file, struct ProgramEntry *entry) {
+    char buffer[PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE];
+    if (fread(buffer, 1, PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE, file) < PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE) {
+        fprintf(stderr, "Unexpected end of file\n");
+        return 1;
+    }
+
+    entry->type = readWord32LittleEndian(buffer);
+    entry->flags = readWord32LittleEndian(buffer + 4);
+    entry->offset = readWord64LittleEndian(buffer + 8);
+    entry->virtualAddress = readWord64LittleEndian(buffer + 16);
+    entry->physicalAddress = readWord64LittleEndian(buffer + 24);
+    entry->fileSize = readWord64LittleEndian(buffer + 32);
+    entry->memSize = readWord64LittleEndian(buffer + 40);
+    entry->alignment = readWord64LittleEndian(buffer + 48);
+
+    return 0;
+}
+
 void dumpHeader(const struct Header *header) {
     printf("Header:\n  class=%u\n  data=%u\n  version=%u\n  osabi=%u\n  abiVersion=%u\n", (int) header->class, (int) header->data, (int) header->version, (int) header->osabi, (int) header->abiVersion);
 }
@@ -84,16 +105,26 @@ void dumpHeaderX(const struct HeaderX *headerX) {
     printf("HeaderX:\n  type=%u\n  machine=%u\n  version=%u\n  entry=%lu\n  programHeaderTable=%lu\n  sectionHeaderTable=%lu\n  flags=%u\n  headerSize=%u\n  programHeaderTableEntrySize=%u\n  programHeaderTableEntryCount=%u\n  sectionHeaderTableEntrySize=%u\n  sectionHeaderTableEntryCount=%u\n  sectionHeaderTableStringTableIndex=%u\n", (int) headerX->type, (int) headerX->machine, (int) headerX->version, headerX->entry, headerX->programHeaderTable, headerX->sectionHeaderTable, (int) headerX->flags, (int) headerX->headerSize, (int) headerX->programHeaderTableEntrySize, (int) headerX->programHeaderTableEntryCount, (int) headerX->sectionHeaderTableEntrySize, (int) headerX->sectionHeaderTableEntryCount, (int) headerX->sectionHeaderTableStringTableIndex);
 }
 
-int main(int argc, const char *argv[]) {
-    FILE *file = fopen(argv[0], "r");
-    if (file == NULL) {
-        fprintf(stderr, "Unable to open file %s\n", argv[0]);
-        return 1;
+void dumpProgramEntry(const struct ProgramEntry *entry) {
+    printf("ProgramEntry:\n  type=%u\n  flags=%u\n  offset=%lu\n  virtualAddress=%lu\n  physicalAddress=%lu\n  fileSize=%lu\n  memSize=%lu\n  alignment=%lu\n", entry->type, entry->flags, entry->offset, entry->virtualAddress, entry->physicalAddress, entry->fileSize, entry->memSize, entry->alignment);
+}
+
+int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
+    for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+        if (parseProgramEntry(file, &entries[entryIndex])) {
+            return 1;
+        }
+
+        printf("#%u ", entryIndex);
+        dumpProgramEntry(entries + entryIndex);
     }
 
+    return 0;
+}
+
+int readFile(FILE *file) {
     struct Header header;
     if (parseHeader(file, &header)) {
-        fclose(file);
         return 1;
     }
 
@@ -112,11 +143,41 @@ int main(int argc, const char *argv[]) {
 
     struct HeaderX headerX;
     if (parseHeaderX(file, &headerX)) {
-        fclose(file);
         return 1;
     }
 
     dumpHeaderX(&headerX);
+
+    if (headerX.programHeaderTable != HEADER_FILE_SIZE + HEADERX_FILE_SIZE) {
+        fprintf(stderr, "Program header table was expected to be at position %u\n", HEADER_FILE_SIZE + HEADERX_FILE_SIZE);
+        return 1;
+    }
+
+    if (headerX.programHeaderTableEntrySize != PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE) {
+        fprintf(stderr, "Program header table entry size was expected to be %u. But it was %u\n", PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE, headerX.programHeaderTableEntrySize);
+        return 1;
+    }
+
+    const int memoryAllocated = PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE * headerX.programHeaderTableEntryCount;
+    struct ProgramEntry *programEntries = malloc(memoryAllocated);
+    if (!programEntries) {
+        fprintf(stderr, "Unable to allocate %u bytes\n", memoryAllocated);
+        return 1;
+    }
+
+    const int result = readProgramEntries(file, programEntries, headerX.programHeaderTableEntryCount);
+    free(programEntries);
+    return result;
+}
+
+int main(int argc, const char *argv[]) {
+    FILE *file = fopen(argv[0], "r");
+    if (file == NULL) {
+        fprintf(stderr, "Unable to open file %s\n", argv[0]);
+        return 1;
+    }
+
+    const int result = readFile(file);
     fclose(file);
-    return 0;
+    return result;
 }
