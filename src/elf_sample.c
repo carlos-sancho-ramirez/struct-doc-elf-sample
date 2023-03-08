@@ -6,6 +6,7 @@
 #define HEADER_FILE_SIZE 16
 #define HEADERX_FILE_SIZE 48
 #define PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE 56
+#define SECTION_HEADER_TABLE_ENTRY_FILE_SIZE 64
 
 int parseHeader(FILE *file, struct Header *header) {
     char buffer[HEADER_FILE_SIZE];
@@ -97,6 +98,27 @@ int parseProgramEntry(FILE *file, struct ProgramEntry *entry) {
     return 0;
 }
 
+int parseSectionEntry(FILE *file, struct SectionEntry *entry) {
+    char buffer[SECTION_HEADER_TABLE_ENTRY_FILE_SIZE];
+    if (fread(buffer, 1, SECTION_HEADER_TABLE_ENTRY_FILE_SIZE, file) < SECTION_HEADER_TABLE_ENTRY_FILE_SIZE) {
+        fprintf(stderr, "Unexpected end of file\n");
+        return 1;
+    }
+
+    entry->name = readWord32LittleEndian(buffer);
+    entry->type = readWord32LittleEndian(buffer + 4);
+    entry->flags = readWord32LittleEndian(buffer + 8);
+    entry->virtualAddress = readWord64LittleEndian(buffer + 16);
+    entry->offset = readWord64LittleEndian(buffer + 24);
+    entry->fileSize = readWord64LittleEndian(buffer + 32);
+    entry->link = readWord32LittleEndian(buffer + 40);
+    entry->info = readWord32LittleEndian(buffer + 44);
+    entry->alignment = readWord64LittleEndian(buffer + 48);
+    entry->entrySize = readWord64LittleEndian(buffer + 56);
+
+    return 0;
+}
+
 void dumpHeader(const struct Header *header) {
     printf("Header:\n  class=%u\n  data=%u\n  version=%u\n  osabi=%u\n  abiVersion=%u\n", (int) header->class, (int) header->data, (int) header->version, (int) header->osabi, (int) header->abiVersion);
 }
@@ -109,6 +131,10 @@ void dumpProgramEntry(const struct ProgramEntry *entry) {
     printf("ProgramEntry:\n  type=%u\n  flags=%u\n  offset=%lu\n  virtualAddress=%lu\n  physicalAddress=%lu\n  fileSize=%lu\n  memSize=%lu\n  alignment=%lu\n", entry->type, entry->flags, entry->offset, entry->virtualAddress, entry->physicalAddress, entry->fileSize, entry->memSize, entry->alignment);
 }
 
+void dumpSectionEntry(const struct SectionEntry *entry) {
+    printf("SectionEntry:\n  name=%u\n  type=%u\n  flags=%lu\n  virtualAddress=%lu\n  offset=%lu\n  fileSize=%lu\n  link=%u\n  info=%u\n  alignment=%lu\n  entrySize=%lu\n", entry->name, entry->type, entry->flags, entry->virtualAddress, entry->offset, entry->fileSize, entry->link, entry->info, entry->alignment, entry->entrySize);
+}
+
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
     for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
         if (parseProgramEntry(file, &entries[entryIndex])) {
@@ -117,6 +143,19 @@ int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount)
 
         printf("#%u ", entryIndex);
         dumpProgramEntry(entries + entryIndex);
+    }
+
+    return 0;
+}
+
+int readSectionEntries(FILE *file, struct SectionEntry *entries, int entryCount) {
+    for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+        if (parseSectionEntry(file, &entries[entryIndex])) {
+            return 1;
+        }
+
+        printf("#%u ", entryIndex);
+        dumpSectionEntry(entries + entryIndex);
     }
 
     return 0;
@@ -158,15 +197,32 @@ int readFile(FILE *file) {
         return 1;
     }
 
-    const int memoryAllocated = PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE * headerX.programHeaderTableEntryCount;
-    struct ProgramEntry *programEntries = malloc(memoryAllocated);
+    const int memoryAllocatedSize = sizeof(struct ProgramEntry) * headerX.programHeaderTableEntryCount +
+            sizeof(struct SectionEntry) * headerX.sectionHeaderTableEntryCount;
+    void *memoryAllocated = malloc(memoryAllocatedSize);
+    struct ProgramEntry *programEntries = (struct ProgramEntry *) memoryAllocated;
+    struct SectionEntry *sectionEntries = memoryAllocated + (sizeof(struct ProgramEntry) * headerX.programHeaderTableEntryCount);
+
     if (!programEntries) {
-        fprintf(stderr, "Unable to allocate %u bytes\n", memoryAllocated);
+        fprintf(stderr, "Unable to allocate %u bytes\n", memoryAllocatedSize);
         return 1;
     }
 
-    const int result = readProgramEntries(file, programEntries, headerX.programHeaderTableEntryCount);
-    free(programEntries);
+    int result = readProgramEntries(file, programEntries, headerX.programHeaderTableEntryCount);
+    if (!result) {
+        int expectedPosition;
+        if (headerX.sectionHeaderTable != (expectedPosition = HEADER_FILE_SIZE + HEADERX_FILE_SIZE + PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE * headerX.programHeaderTableEntryCount) &&
+                fseek(file, headerX.sectionHeaderTable, SEEK_SET)) {
+            fprintf(stderr, "Unable to set file position at %lu\n", headerX.sectionHeaderTable);
+            result = 1;
+        }
+    }
+
+    if (!result) {
+        result = readSectionEntries(file, sectionEntries, headerX.sectionHeaderTableEntryCount);
+    }
+
+    free(memoryAllocated);
     return result;
 }
 
