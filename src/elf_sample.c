@@ -131,8 +131,8 @@ void dumpProgramEntry(const struct ProgramEntry *entry) {
     printf("ProgramEntry:\n  type=%u\n  flags=%u\n  offset=%lu\n  virtualAddress=%lu\n  physicalAddress=%lu\n  fileSize=%lu\n  memSize=%lu\n  alignment=%lu\n", entry->type, entry->flags, entry->offset, entry->virtualAddress, entry->physicalAddress, entry->fileSize, entry->memSize, entry->alignment);
 }
 
-void dumpSectionEntry(const struct SectionEntry *entry) {
-    printf("SectionEntry:\n  name=%u\n  type=%u\n  flags=%lu\n  virtualAddress=%lu\n  offset=%lu\n  fileSize=%lu\n  link=%u\n  info=%u\n  alignment=%lu\n  entrySize=%lu\n", entry->name, entry->type, entry->flags, entry->virtualAddress, entry->offset, entry->fileSize, entry->link, entry->info, entry->alignment, entry->entrySize);
+void dumpSectionEntry(const struct SectionEntry *entry, const unsigned char *stringTable) {
+    printf("SectionEntry:\n  name=%s\n  type=%u\n  flags=%lu\n  virtualAddress=%lu\n  offset=%lu\n  fileSize=%lu\n  link=%u\n  info=%u\n  alignment=%lu\n  entrySize=%lu\n", stringTable + entry->name, entry->type, entry->flags, entry->virtualAddress, entry->offset, entry->fileSize, entry->link, entry->info, entry->alignment, entry->entrySize);
 }
 
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
@@ -153,9 +153,20 @@ int readSectionEntries(FILE *file, struct SectionEntry *entries, int entryCount)
         if (parseSectionEntry(file, &entries[entryIndex])) {
             return 1;
         }
+    }
 
-        printf("#%u ", entryIndex);
-        dumpSectionEntry(entries + entryIndex);
+    return 0;
+}
+
+int readStringTable(FILE *file, const struct SectionEntry *stringTableSection, unsigned char *stringTable) {
+    if (fseek(file, stringTableSection->offset, SEEK_SET)) {
+        fprintf(stderr, "Unable to set file position at %lu\n", stringTableSection->offset);
+        return 1;
+    }
+
+    if (fread(stringTable, 1, stringTableSection->fileSize, file) < stringTableSection->fileSize) {
+        fprintf(stderr, "Unexpected end of file\n");
+        return 1;
     }
 
     return 0;
@@ -197,16 +208,22 @@ int readFile(FILE *file) {
         return 1;
     }
 
+    if (headerX.sectionHeaderTableStringTableIndex >= headerX.sectionHeaderTableEntryCount) {
+        fprintf(stderr, "Wrong index for .shstrtab section. Found %u, but it should be lower than %u\n", headerX.sectionHeaderTableStringTableIndex, headerX.sectionHeaderTableEntryCount);
+        return 1;
+    }
+
     const int memoryAllocatedSize = sizeof(struct ProgramEntry) * headerX.programHeaderTableEntryCount +
             sizeof(struct SectionEntry) * headerX.sectionHeaderTableEntryCount;
     void *memoryAllocated = malloc(memoryAllocatedSize);
-    struct ProgramEntry *programEntries = (struct ProgramEntry *) memoryAllocated;
-    struct SectionEntry *sectionEntries = memoryAllocated + (sizeof(struct ProgramEntry) * headerX.programHeaderTableEntryCount);
 
-    if (!programEntries) {
+    if (!memoryAllocated) {
         fprintf(stderr, "Unable to allocate %u bytes\n", memoryAllocatedSize);
         return 1;
     }
+
+    struct ProgramEntry *programEntries = (struct ProgramEntry *) memoryAllocated;
+    struct SectionEntry *sectionEntries = memoryAllocated + (sizeof(struct ProgramEntry) * headerX.programHeaderTableEntryCount);
 
     int result = readProgramEntries(file, programEntries, headerX.programHeaderTableEntryCount);
     if (!result) {
@@ -220,6 +237,30 @@ int readFile(FILE *file) {
 
     if (!result) {
         result = readSectionEntries(file, sectionEntries, headerX.sectionHeaderTableEntryCount);
+    }
+
+    const struct SectionEntry *stringTableSection;
+    unsigned char *stringTable;
+    if (!result) {
+        stringTableSection = sectionEntries + headerX.sectionHeaderTableStringTableIndex;
+        stringTable = malloc(sectionEntries->fileSize);
+        if (!stringTable) {
+            fprintf(stderr, "Unable to allocate %lu bytes\n", sectionEntries->fileSize);
+            result = 1;
+        }
+    }
+
+    if (!result) {
+        result = readStringTable(file, stringTableSection, stringTable);
+
+        if (!result) {
+            for (int entryIndex = 0; entryIndex < headerX.sectionHeaderTableEntryCount; entryIndex++) {
+                printf("#%u ", entryIndex);
+                dumpSectionEntry(sectionEntries + entryIndex, stringTable);
+            }
+        }
+
+        free(stringTable);
     }
 
     free(memoryAllocated);
