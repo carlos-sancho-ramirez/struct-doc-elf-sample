@@ -1,12 +1,17 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include "elf_structs.h"
+#include <string.h>
+#include "sections.h"
 
 #define HEADER_FILE_SIZE 16
 #define HEADERX_FILE_SIZE 48
 #define PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE 56
 #define SECTION_HEADER_TABLE_ENTRY_FILE_SIZE 64
+#define SYMBOL_ENTRY_64_FILE_SIZE 24
+
+#define SECTION_ENTRY_TYPE_STRING_TABLE 3
+#define SECTION_ENTRY_TYPE_DYNAMIC_SYMBOL_TABLE 11
 
 int parseHeader(FILE *file, struct Header *header) {
     char buffer[HEADER_FILE_SIZE];
@@ -119,6 +124,23 @@ int parseSectionEntry(FILE *file, struct SectionEntry *entry) {
     return 0;
 }
 
+int parseDynamicSymbolEntry(FILE *file, struct SymbolEntry64 *entry) {
+    char buffer[SYMBOL_ENTRY_64_FILE_SIZE];
+    if (fread(buffer, 1, SYMBOL_ENTRY_64_FILE_SIZE, file) < SYMBOL_ENTRY_64_FILE_SIZE) {
+        fprintf(stderr, "Unexpected end of file\n");
+        return 1;
+    }
+
+    entry->name = readWord32LittleEndian(buffer);
+    entry->info = buffer[4];
+    entry->other = buffer[5];
+    entry->sectionIndex = readWord16LittleEndian(buffer + 6);
+    entry->value = readWord64LittleEndian(buffer + 8);
+    entry->size = readWord64LittleEndian(buffer + 16);
+
+    return 0;
+}
+
 void dumpHeader(const struct Header *header) {
     printf("Header:\n  class=%u\n  data=%u\n  version=%u\n  osabi=%u\n  abiVersion=%u\n", (int) header->class, (int) header->data, (int) header->version, (int) header->osabi, (int) header->abiVersion);
 }
@@ -133,6 +155,10 @@ void dumpProgramEntry(const struct ProgramEntry *entry) {
 
 void dumpSectionEntry(const struct SectionEntry *entry, const unsigned char *stringTable) {
     printf("SectionEntry:\n  name=%s\n  type=%u\n  flags=%lu\n  virtualAddress=%lu\n  offset=%lu\n  fileSize=%lu\n  link=%u\n  info=%u\n  alignment=%lu\n  entrySize=%lu\n", stringTable + entry->name, entry->type, entry->flags, entry->virtualAddress, entry->offset, entry->fileSize, entry->link, entry->info, entry->alignment, entry->entrySize);
+}
+
+void dumpSymbolEntry64(const struct SymbolEntry64 *entry, const unsigned char *stringTable) {
+    printf("SymbolEntry64:\n  name=%s\n  info=%u\n  other=%u\n  value=%lu\n  size=%lu\n", stringTable + entry->name, entry->info, entry->other, entry->value, entry->size);
 }
 
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
@@ -170,6 +196,105 @@ int readStringTable(FILE *file, const struct SectionEntry *stringTableSection, u
     }
 
     return 0;
+}
+
+int isDynSymSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+    return entry->type == SECTION_ENTRY_TYPE_DYNAMIC_SYMBOL_TABLE && strcmp(".dynsym", stringTable + entry->name) == 0;
+}
+
+int isDynStrSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+    return entry->type == SECTION_ENTRY_TYPE_STRING_TABLE && strcmp(".dynstr", stringTable + entry->name) == 0;
+}
+
+int readDynamicSymbolEntries(FILE *file, long offset, struct SymbolEntry64 *entries, int entryCount) {
+    if (fseek(file, offset, SEEK_SET)) {
+        fprintf(stderr, "Unable to set file position at %lu\n", offset);
+        return 1;
+    }
+
+    for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+        if (parseDynamicSymbolEntry(file, &entries[entryIndex])) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct HeaderX *headerX) {
+    struct ProgramEntry *programEntries = (struct ProgramEntry *) memoryAllocated;
+    struct SectionEntry *sectionEntries = memoryAllocated + (sizeof(struct ProgramEntry) * headerX->programHeaderTableEntryCount);
+
+    int result;
+    if ((result = readProgramEntries(file, programEntries, headerX->programHeaderTableEntryCount))) {
+        return result;
+    }
+
+    int expectedPosition;
+    if (headerX->sectionHeaderTable != (expectedPosition = HEADER_FILE_SIZE + HEADERX_FILE_SIZE + PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE * headerX->programHeaderTableEntryCount) &&
+            fseek(file, headerX->sectionHeaderTable, SEEK_SET)) {
+        fprintf(stderr, "Unable to set file position at %lu\n", headerX->sectionHeaderTable);
+        return 1;
+    }
+
+    if (result = readSectionEntries(file, sectionEntries, headerX->sectionHeaderTableEntryCount)) {
+        return result;
+    }
+
+    const struct SectionEntry *stringTableSection;
+    unsigned char *stringTable;
+    stringTableSection = sectionEntries + headerX->sectionHeaderTableStringTableIndex;
+    stringTable = malloc(stringTableSection->fileSize);
+    if (!stringTable) {
+        fprintf(stderr, "Unable to allocate %lu bytes\n", stringTableSection->fileSize);
+        return 1;
+    }
+
+    if (!(result = readStringTable(file, stringTableSection, stringTable))) {
+        for (int entryIndex = 0; entryIndex < headerX->sectionHeaderTableEntryCount; entryIndex++) {
+            printf("#%u ", entryIndex);
+            dumpSectionEntry(sectionEntries + entryIndex, stringTable);
+        }
+    }
+
+    const struct SectionEntry *dynSymSection;
+    if (!result && (dynSymSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynSymSectionEntry))) {
+        const struct SectionEntry *dynStrSection;
+        if (!(dynStrSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynStrSectionEntry))) {
+            fprintf(stderr, ".dynsym section found but .dynstr is missing\n");
+            result = 1;
+        }
+
+        long symbolCount;
+        void *dynSymAllocatedMemory;
+        if (!result) {
+            symbolCount = dynSymSection->fileSize / SYMBOL_ENTRY_64_FILE_SIZE;
+            const long memoryToAllocate = sizeof(struct SymbolEntry64) * symbolCount + dynStrSection->fileSize;
+            if (!(dynSymAllocatedMemory = malloc(memoryToAllocate))) {
+                fprintf(stderr, "Unable to allocate %lu byte for the dynamic symbol table\n", memoryToAllocate);
+                result = 1;
+            }
+        }
+
+        if (!result) {
+            struct SymbolEntry64 *symbolEntries = dynSymAllocatedMemory;
+            char *symbolStringTable = dynSymAllocatedMemory + (sizeof(struct SymbolEntry64) * symbolCount);
+            if (readDynamicSymbolEntries(file, dynSymSection->offset, symbolEntries, symbolCount) || readStringTable(file, dynStrSection, symbolStringTable)) {
+                result = 1;
+            }
+            else {
+                for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
+                    printf("#%u ", entryIndex);
+                    dumpSymbolEntry64(symbolEntries + entryIndex, symbolStringTable);
+                }
+            }
+
+            free(dynSymAllocatedMemory);
+        }
+    }
+
+    free(stringTable);
+    return result;
 }
 
 int readFile(FILE *file) {
@@ -217,54 +342,15 @@ int readFile(FILE *file) {
             sizeof(struct SectionEntry) * headerX.sectionHeaderTableEntryCount;
     void *memoryAllocated = malloc(memoryAllocatedSize);
 
-    if (!memoryAllocated) {
+    if (memoryAllocated) {
+        int result = readProgramAndSectionEntries(file, memoryAllocated, &headerX);
+        free(memoryAllocated);
+        return result;
+    }
+    else {
         fprintf(stderr, "Unable to allocate %u bytes\n", memoryAllocatedSize);
         return 1;
     }
-
-    struct ProgramEntry *programEntries = (struct ProgramEntry *) memoryAllocated;
-    struct SectionEntry *sectionEntries = memoryAllocated + (sizeof(struct ProgramEntry) * headerX.programHeaderTableEntryCount);
-
-    int result = readProgramEntries(file, programEntries, headerX.programHeaderTableEntryCount);
-    if (!result) {
-        int expectedPosition;
-        if (headerX.sectionHeaderTable != (expectedPosition = HEADER_FILE_SIZE + HEADERX_FILE_SIZE + PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE * headerX.programHeaderTableEntryCount) &&
-                fseek(file, headerX.sectionHeaderTable, SEEK_SET)) {
-            fprintf(stderr, "Unable to set file position at %lu\n", headerX.sectionHeaderTable);
-            result = 1;
-        }
-    }
-
-    if (!result) {
-        result = readSectionEntries(file, sectionEntries, headerX.sectionHeaderTableEntryCount);
-    }
-
-    const struct SectionEntry *stringTableSection;
-    unsigned char *stringTable;
-    if (!result) {
-        stringTableSection = sectionEntries + headerX.sectionHeaderTableStringTableIndex;
-        stringTable = malloc(sectionEntries->fileSize);
-        if (!stringTable) {
-            fprintf(stderr, "Unable to allocate %lu bytes\n", sectionEntries->fileSize);
-            result = 1;
-        }
-    }
-
-    if (!result) {
-        result = readStringTable(file, stringTableSection, stringTable);
-
-        if (!result) {
-            for (int entryIndex = 0; entryIndex < headerX.sectionHeaderTableEntryCount; entryIndex++) {
-                printf("#%u ", entryIndex);
-                dumpSectionEntry(sectionEntries + entryIndex, stringTable);
-            }
-        }
-
-        free(stringTable);
-    }
-
-    free(memoryAllocated);
-    return result;
 }
 
 int main(int argc, const char *argv[]) {

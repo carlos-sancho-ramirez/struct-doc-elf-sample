@@ -8,6 +8,7 @@ build/include/elf_structs.h:
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/HeaderX --in-types "w16=word16LittleEndian;w32=word32LittleEndian;addr=word64LittleEndian;offset=word64LittleEndian" >> $@
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/ProgramEntry --in-types "w32=word32LittleEndian;w32Just32=void;w32Just64=word32LittleEndian;addr=word64LittleEndian;offset=word64LittleEndian" >> $@
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/SectionEntry --in-types "stringOffset=word32LittleEndian;flags=word64LittleEndian;w32=word32LittleEndian;addr=word64LittleEndian;offset=word64LittleEndian" >> $@
+	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/SymbolEntry64 --in-types "w16=word16LittleEndian;w32=word32LittleEndian;w64=word64LittleEndian" >> $@
 
 clean:
 	rm -r build
