@@ -10,6 +10,7 @@
 #define SECTION_HEADER_TABLE_ENTRY_FILE_SIZE 64
 #define SYMBOL_ENTRY_64_FILE_SIZE 24
 
+#define SECTION_ENTRY_TYPE_SYMBOL_TABLE 2
 #define SECTION_ENTRY_TYPE_STRING_TABLE 3
 #define SECTION_ENTRY_TYPE_DYNAMIC_SYMBOL_TABLE 11
 
@@ -206,6 +207,14 @@ int isDynStrSectionEntry(const struct SectionEntry *entry, const char *stringTab
     return entry->type == SECTION_ENTRY_TYPE_STRING_TABLE && strcmp(".dynstr", stringTable + entry->name) == 0;
 }
 
+int isSymTabSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+    return entry->type == SECTION_ENTRY_TYPE_SYMBOL_TABLE && strcmp(".symtab", stringTable + entry->name) == 0;
+}
+
+int isStrTabSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+    return entry->type == SECTION_ENTRY_TYPE_STRING_TABLE && strcmp(".strtab", stringTable + entry->name) == 0;
+}
+
 int readDynamicSymbolEntries(FILE *file, long offset, struct SymbolEntry64 *entries, int entryCount) {
     if (fseek(file, offset, SEEK_SET)) {
         fprintf(stderr, "Unable to set file position at %lu\n", offset);
@@ -271,7 +280,7 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
             symbolCount = dynSymSection->fileSize / SYMBOL_ENTRY_64_FILE_SIZE;
             const long memoryToAllocate = sizeof(struct SymbolEntry64) * symbolCount + dynStrSection->fileSize;
             if (!(dynSymAllocatedMemory = malloc(memoryToAllocate))) {
-                fprintf(stderr, "Unable to allocate %lu byte for the dynamic symbol table\n", memoryToAllocate);
+                fprintf(stderr, "Unable to allocate %lu bytes for the dynamic symbol table\n", memoryToAllocate);
                 result = 1;
             }
         }
@@ -290,6 +299,42 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
             }
 
             free(dynSymAllocatedMemory);
+        }
+    }
+
+    const struct SectionEntry *symTabSection;
+    if (!result && (symTabSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isSymTabSectionEntry))) {
+        const struct SectionEntry *strTabSection;
+        if (!(strTabSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isStrTabSectionEntry))) {
+            fprintf(stderr, ".symtab section found but .strtab is missing\n");
+            result = 1;
+        }
+
+        long symbolCount;
+        void *symTabAllocatedMemory;
+        if (!result) {
+            symbolCount = symTabSection->fileSize / SYMBOL_ENTRY_64_FILE_SIZE;
+            const long memoryToAllocate = sizeof(struct SymbolEntry64) * symbolCount + strTabSection->fileSize;
+            if (!(symTabAllocatedMemory = malloc(memoryToAllocate))) {
+                fprintf(stderr, "Unable to allocate %lu bytes for the dynamic symbol table\n", memoryToAllocate);
+                result = 1;
+            }
+        }
+
+        if (!result) {
+            struct SymbolEntry64 *symbolEntries = symTabAllocatedMemory;
+            char *symbolStringTable = symTabAllocatedMemory + (sizeof(struct SymbolEntry64) * symbolCount);
+            if (readDynamicSymbolEntries(file, symTabSection->offset, symbolEntries, symbolCount) || readStringTable(file, strTabSection, symbolStringTable)) {
+                result = 1;
+            }
+            else {
+                for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
+                    printf("#%u ", entryIndex);
+                    dumpSymbolEntry64(symbolEntries + entryIndex, symbolStringTable);
+                }
+            }
+
+            free(symTabAllocatedMemory);
         }
     }
 
