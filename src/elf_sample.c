@@ -9,9 +9,11 @@
 #define PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE 56
 #define SECTION_HEADER_TABLE_ENTRY_FILE_SIZE 64
 #define SYMBOL_ENTRY_64_FILE_SIZE 24
+#define RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE 24
 
 #define SECTION_ENTRY_TYPE_SYMBOL_TABLE 2
 #define SECTION_ENTRY_TYPE_STRING_TABLE 3
+#define SECTION_ENTRY_TYPE_RELOCATION_TABLE_WITH_ADDENDS 4
 #define SECTION_ENTRY_TYPE_DYNAMIC_SYMBOL_TABLE 11
 
 int parseHeader(FILE *file, struct Header *header) {
@@ -142,6 +144,20 @@ int parseDynamicSymbolEntry(FILE *file, struct SymbolEntry64 *entry) {
     return 0;
 }
 
+int parseRelocationEntryWithAddend(FILE *file, struct RelocationEntryWithAddend *entry) {
+    char buffer[RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE];
+    if (fread(buffer, 1, RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE, file) < RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE) {
+        fprintf(stderr, "Unexpected end of file\n");
+        return 1;
+    }
+
+    entry->address = readWord64LittleEndian(buffer);
+    entry->info = readWord64LittleEndian(buffer + 8);
+    entry->addend = readWord64LittleEndian(buffer + 16);
+
+    return 0;
+}
+
 void dumpHeader(const struct Header *header) {
     printf("Header:\n  class=%u\n  data=%u\n  version=%u\n  osabi=%u\n  abiVersion=%u\n", (int) header->class, (int) header->data, (int) header->version, (int) header->osabi, (int) header->abiVersion);
 }
@@ -160,6 +176,10 @@ void dumpSectionEntry(const struct SectionEntry *entry, const unsigned char *str
 
 void dumpSymbolEntry64(const struct SymbolEntry64 *entry, const unsigned char *stringTable) {
     printf("SymbolEntry64:\n  name=%s\n  info=%u\n  other=%u\n  value=%lu\n  size=%lu\n", stringTable + entry->name, entry->info, entry->other, entry->value, entry->size);
+}
+
+void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry) {
+    printf("RelationEntry:\n  address=%lu\n  info=0x%lx\n  addend=%lu\n", entry->address, entry->info, entry->addend);
 }
 
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
@@ -215,6 +235,10 @@ int isStrTabSectionEntry(const struct SectionEntry *entry, const char *stringTab
     return entry->type == SECTION_ENTRY_TYPE_STRING_TABLE && strcmp(".strtab", stringTable + entry->name) == 0;
 }
 
+int isRelaDynSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+    return entry->type == SECTION_ENTRY_TYPE_RELOCATION_TABLE_WITH_ADDENDS && strcmp(".rela.dyn", stringTable + entry->name) == 0;
+}
+
 int readDynamicSymbolEntries(FILE *file, long offset, struct SymbolEntry64 *entries, int entryCount) {
     if (fseek(file, offset, SEEK_SET)) {
         fprintf(stderr, "Unable to set file position at %lu\n", offset);
@@ -223,6 +247,21 @@ int readDynamicSymbolEntries(FILE *file, long offset, struct SymbolEntry64 *entr
 
     for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
         if (parseDynamicSymbolEntry(file, &entries[entryIndex])) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int readRelocationEntriesWithAddend(FILE *file, long offset, struct RelocationEntryWithAddend *entries, int entryCount) {
+    if (fseek(file, offset, SEEK_SET)) {
+        fprintf(stderr, "Unable to set file position at %lu\n", offset);
+        return 1;
+    }
+
+    for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+        if (parseRelocationEntryWithAddend(file, &entries[entryIndex])) {
             return 1;
         }
     }
@@ -292,6 +331,7 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
                 result = 1;
             }
             else {
+                printf("\nDynamic symbol table (.dynsym):\n");
                 for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
                     printf("#%u ", entryIndex);
                     dumpSymbolEntry64(symbolEntries + entryIndex, symbolStringTable);
@@ -328,6 +368,7 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
                 result = 1;
             }
             else {
+                printf("\nDynamic symbol table (.symtab):\n");
                 for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
                     printf("#%u ", entryIndex);
                     dumpSymbolEntry64(symbolEntries + entryIndex, symbolStringTable);
@@ -335,6 +376,32 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
             }
 
             free(symTabAllocatedMemory);
+        }
+    }
+
+    const struct SectionEntry *relaDynSection;
+    if (!result && (relaDynSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isRelaDynSectionEntry))) {
+        long symbolCount = relaDynSection->fileSize / RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE;
+        const long memoryToAllocate = sizeof(struct RelocationEntryWithAddend) * symbolCount;
+        struct RelocationEntryWithAddend *relocationEntries;
+        if (!(relocationEntries = malloc(memoryToAllocate))) {
+            fprintf(stderr, "Unable to allocate %lu bytes for the relation table\n", memoryToAllocate);
+            result = 1;
+        }
+
+        if (!result) {
+            if (readRelocationEntriesWithAddend(file, relaDynSection->offset, relocationEntries, symbolCount)) {
+                result = 1;
+            }
+            else {
+                printf("\nRelocation table (.rela.dyn):\n");
+                for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
+                    printf("#%u ", entryIndex);
+                    dumpRelocationEntryWithAddend(relocationEntries + entryIndex);
+                }
+            }
+
+            free(relocationEntries);
         }
     }
 
