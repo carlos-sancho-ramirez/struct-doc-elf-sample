@@ -178,7 +178,7 @@ void dumpSymbolEntry64(const struct SymbolEntry64 *entry, const unsigned char *s
     printf("SymbolEntry64:\n  name=%s\n  info=%u\n  other=%u\n  value=%lu\n  size=%lu\n", stringTable + entry->name, entry->info, entry->other, entry->value, entry->size);
 }
 
-void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry, const struct SectionEntry *sections, int sectionCount, const char *stringTable) {
+void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry, const struct SectionEntry *sections, int sectionCount, const char *stringTable, const struct SymbolEntry64 *symbols, const int symbolCount, const char *symbolStringTable) {
     printf("RelocationEntryWithAddend:\n  address=%lu", entry->address);
     for (int sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++) {
         const struct SectionEntry *section = sections + sectionIndex;
@@ -188,7 +188,16 @@ void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry
         }
     }
 
-    printf("\n  info=0x%lx\n  addend=%lu\n", entry->info, entry->addend);
+    printf("\n  info=0x%lx", entry->info);
+    const int symbolIndex = entry->info >> 32;
+    if (symbolIndex < symbolCount && symbols != NULL && symbolStringTable != NULL) {
+        const char *symbolName = symbolStringTable + symbols[symbolIndex].name;
+        if (symbolName[0] != '\0') {
+            printf("\t\t# %s", symbolName);
+        }
+    }
+
+    printf("\n  addend=%lu\n", entry->addend);
 }
 
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
@@ -315,6 +324,10 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
     }
 
     const struct SectionEntry *dynSymSection;
+    long symbolCount = 0;
+    struct SymbolEntry64 *symbolEntries = NULL;
+    char *symbolStringTable = NULL;
+
     if (!result && (dynSymSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynSymSectionEntry))) {
         const struct SectionEntry *dynStrSection;
         if (!(dynStrSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynStrSectionEntry))) {
@@ -322,7 +335,6 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
             result = 1;
         }
 
-        long symbolCount;
         void *dynSymAllocatedMemory;
         if (!result) {
             symbolCount = dynSymSection->fileSize / SYMBOL_ENTRY_64_FILE_SIZE;
@@ -334,8 +346,8 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
         }
 
         if (!result) {
-            struct SymbolEntry64 *symbolEntries = dynSymAllocatedMemory;
-            char *symbolStringTable = dynSymAllocatedMemory + (sizeof(struct SymbolEntry64) * symbolCount);
+            symbolEntries = dynSymAllocatedMemory;
+            symbolStringTable = dynSymAllocatedMemory + (sizeof(struct SymbolEntry64) * symbolCount);
             if (readDynamicSymbolEntries(file, dynSymSection->offset, symbolEntries, symbolCount) || readStringTable(file, dynStrSection, symbolStringTable)) {
                 result = 1;
             }
@@ -346,8 +358,6 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
                     dumpSymbolEntry64(symbolEntries + entryIndex, symbolStringTable);
                 }
             }
-
-            free(dynSymAllocatedMemory);
         }
     }
 
@@ -406,12 +416,16 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
                 printf("\nRelocation table (.rela.dyn):\n");
                 for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
                     printf("#%u ", entryIndex);
-                    dumpRelocationEntryWithAddend(relocationEntries + entryIndex, sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable);
+                    dumpRelocationEntryWithAddend(relocationEntries + entryIndex, sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, symbolEntries, symbolCount, symbolStringTable);
                 }
             }
 
             free(relocationEntries);
         }
+    }
+
+    if (symbolEntries) {
+        free(symbolEntries);
     }
 
     free(stringTable);
