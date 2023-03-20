@@ -178,8 +178,17 @@ void dumpSymbolEntry64(const struct SymbolEntry64 *entry, const unsigned char *s
     printf("SymbolEntry64:\n  name=%s\n  info=%u\n  other=%u\n  value=%lu\n  size=%lu\n", stringTable + entry->name, entry->info, entry->other, entry->value, entry->size);
 }
 
-void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry) {
-    printf("RelationEntry:\n  address=%lu\n  info=0x%lx\n  addend=%lu\n", entry->address, entry->info, entry->addend);
+void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry, const struct SectionEntry *sections, int sectionCount, const char *stringTable) {
+    printf("RelocationEntryWithAddend:\n  address=%lu", entry->address);
+    for (int sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++) {
+        const struct SectionEntry *section = sections + sectionIndex;
+        const long sectionAddress = section->virtualAddress;
+        if (entry->address >= sectionAddress && entry->address < (sectionAddress + section->fileSize)) {
+            printf("\t\t#%s + 0x%lx", stringTable + section->name, entry->address - sectionAddress);
+        }
+    }
+
+    printf("\n  info=0x%lx\n  addend=%lu\n", entry->info, entry->addend);
 }
 
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
@@ -397,7 +406,7 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
                 printf("\nRelocation table (.rela.dyn):\n");
                 for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
                     printf("#%u ", entryIndex);
-                    dumpRelocationEntryWithAddend(relocationEntries + entryIndex);
+                    dumpRelocationEntryWithAddend(relocationEntries + entryIndex, sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable);
                 }
             }
 
