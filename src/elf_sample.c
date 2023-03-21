@@ -174,8 +174,41 @@ void dumpSectionEntry(const struct SectionEntry *entry, const unsigned char *str
     printf("SectionEntry:\n  name=%s\n  type=%u\n  flags=%lu\n  virtualAddress=%lu\n  offset=%lu\n  fileSize=%lu\n  link=%u\n  info=%u\n  alignment=%lu\n  entrySize=%lu\n", stringTable + entry->name, entry->type, entry->flags, entry->virtualAddress, entry->offset, entry->fileSize, entry->link, entry->info, entry->alignment, entry->entrySize);
 }
 
+#define SYMBOL_ENTRY_NUMBER_OF_TYPES 7
+
+const char *symbolEntryTypeNames[SYMBOL_ENTRY_NUMBER_OF_TYPES] = {
+    "No type",
+    "Object",
+    "Function",
+    "Section",
+    "File",
+    "Common data object",
+    "Thread-local data object"
+};
+
+#define SYMBOL_ENTRY_NUMBER_OF_BINDINGS 3
+
+const char *symbolEntryBindNames[SYMBOL_ENTRY_NUMBER_OF_BINDINGS] = {
+    "Local",
+    "Global",
+    "Weak"
+};
+
 void dumpSymbolEntry64(const struct SymbolEntry64 *entry, const unsigned char *stringTable) {
-    printf("SymbolEntry64:\n  name=%s\n  info=%u\n  other=%u\n  value=%lu\n  size=%lu\n", stringTable + entry->name, entry->info, entry->other, entry->value, entry->size);
+    printf("SymbolEntry64:\n  name=%s\n  info=%u", stringTable + entry->name, entry->info);
+    const int type = entry->info & 0x0F;
+    const int bind = entry->info >> 4;
+    if (type < SYMBOL_ENTRY_NUMBER_OF_TYPES) {
+        printf("\t\t# %s", symbolEntryTypeNames[type]);
+        if (bind < SYMBOL_ENTRY_NUMBER_OF_BINDINGS) {
+            printf(" (%s)", symbolEntryBindNames[bind]);
+        }
+    }
+    else if (bind < SYMBOL_ENTRY_NUMBER_OF_BINDINGS) {
+        printf("\t\t# ? (%s)", symbolEntryBindNames[bind]);
+    }
+
+    printf("\n  other=%u\n  value=%lu\n  size=%lu\n", entry->other, entry->value, entry->size);
 }
 
 void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry, const struct SectionEntry *sections, int sectionCount, const char *stringTable, const struct SymbolEntry64 *symbols, const int symbolCount, const char *symbolStringTable) {
