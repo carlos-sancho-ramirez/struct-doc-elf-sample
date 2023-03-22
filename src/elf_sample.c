@@ -10,10 +10,12 @@
 #define SECTION_HEADER_TABLE_ENTRY_FILE_SIZE 64
 #define SYMBOL_ENTRY_64_FILE_SIZE 24
 #define RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE 24
+#define DYNAMIC_TABLE_ENTRY_64_FILE_SIZE 16
 
 #define SECTION_ENTRY_TYPE_SYMBOL_TABLE 2
 #define SECTION_ENTRY_TYPE_STRING_TABLE 3
 #define SECTION_ENTRY_TYPE_RELOCATION_TABLE_WITH_ADDENDS 4
+#define SECTION_ENTRY_TYPE_DYNAMIC_TABLE 6
 #define SECTION_ENTRY_TYPE_DYNAMIC_SYMBOL_TABLE 11
 
 int parseHeader(FILE *file, struct Header *header) {
@@ -158,6 +160,19 @@ int parseRelocationEntryWithAddend(FILE *file, struct RelocationEntryWithAddend 
     return 0;
 }
 
+int parseDynamicEntry(FILE *file, struct DynamicEntry *entry) {
+    char buffer[DYNAMIC_TABLE_ENTRY_64_FILE_SIZE];
+    if (fread(buffer, 1, DYNAMIC_TABLE_ENTRY_64_FILE_SIZE, file) < DYNAMIC_TABLE_ENTRY_64_FILE_SIZE) {
+        fprintf(stderr, "Unexpected end of file\n");
+        return 1;
+    }
+
+    entry->tag = readWord64LittleEndian(buffer);
+    entry->value = readWord64LittleEndian(buffer + 8);
+
+    return 0;
+}
+
 void dumpHeader(const struct Header *header) {
     printf("Header:\n  class=%u\n  data=%u\n  version=%u\n  osabi=%u\n  abiVersion=%u\n", (int) header->class, (int) header->data, (int) header->version, (int) header->osabi, (int) header->abiVersion);
 }
@@ -233,6 +248,12 @@ void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry
     printf("\n  addend=%lu\n", entry->addend);
 }
 
+void dumpDynamicEntry(const struct DynamicEntry *entry) {
+    printf("(%lu)", entry->tag);
+    printf(": ");
+    printf("(%lu)\n", entry->value);
+}
+
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
     for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
         if (parseProgramEntry(file, &entries[entryIndex])) {
@@ -290,6 +311,10 @@ int isRelaDynSectionEntry(const struct SectionEntry *entry, const char *stringTa
     return entry->type == SECTION_ENTRY_TYPE_RELOCATION_TABLE_WITH_ADDENDS && strcmp(".rela.dyn", stringTable + entry->name) == 0;
 }
 
+int isDynamicSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+    return entry->type == SECTION_ENTRY_TYPE_DYNAMIC_TABLE && strcmp(".dynamic", stringTable + entry->name) == 0;
+}
+
 int readDynamicSymbolEntries(FILE *file, long offset, struct SymbolEntry64 *entries, int entryCount) {
     if (fseek(file, offset, SEEK_SET)) {
         fprintf(stderr, "Unable to set file position at %lu\n", offset);
@@ -313,6 +338,21 @@ int readRelocationEntriesWithAddend(FILE *file, long offset, struct RelocationEn
 
     for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
         if (parseRelocationEntryWithAddend(file, &entries[entryIndex])) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int readDynamicEntries(FILE *file, long offset, struct DynamicEntry *entries, int entryCount) {
+    if (fseek(file, offset, SEEK_SET)) {
+        fprintf(stderr, "Unable to set file position at %lu\n", offset);
+        return 1;
+    }
+
+    for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+        if (parseDynamicEntry(file, &entries[entryIndex])) {
             return 1;
         }
     }
@@ -454,6 +494,32 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
             }
 
             free(relocationEntries);
+        }
+    }
+
+    const struct SectionEntry *dynamicSection;
+    if (!result && (dynamicSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynamicSectionEntry))) {
+        long symbolCount = dynamicSection->fileSize / DYNAMIC_TABLE_ENTRY_64_FILE_SIZE;
+        const long memoryToAllocate = sizeof(struct DynamicEntry) * symbolCount;
+        struct DynamicEntry *dynamicEntries;
+        if (!(dynamicEntries = malloc(memoryToAllocate))) {
+            fprintf(stderr, "Unable to allocate %lu bytes for the dynamic table\n", memoryToAllocate);
+            result = 1;
+        }
+
+        if (!result) {
+            if (readDynamicEntries(file, dynamicSection->offset, dynamicEntries, symbolCount)) {
+                result = 1;
+            }
+            else {
+                printf("\nDynamic table (.dynamic):\n");
+                for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
+                    printf("#%u ", entryIndex);
+                    dumpDynamicEntry(dynamicEntries + entryIndex);
+                }
+            }
+
+            free(dynamicEntries);
         }
     }
 

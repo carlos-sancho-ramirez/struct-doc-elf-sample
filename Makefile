@@ -15,6 +15,8 @@ build/include/elf_structs.h:
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/SymbolEntry64 --in-types "w16=word16LittleEndian;w32=word32LittleEndian;w64=word64LittleEndian" >> $@
 	echo "" >> $@
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/RelocationEntryWithAddend --in-types "word=word64LittleEndian" >> $@
+	echo "" >> $@
+	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/DynamicEntry --in-types "word=word64LittleEndian" >> $@
 
 clean:
 	rm -r build
