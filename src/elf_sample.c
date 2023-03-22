@@ -251,6 +251,7 @@ void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry
 #define DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES 35
 #define DYNAMIC_ENTRY_TAG_NEEDED 1
 #define DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET 5
+#define DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET 6
 
 const char *dynamicEntryTagNames[DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES] = {
     "?",
@@ -259,7 +260,7 @@ const char *dynamicEntryTagNames[DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES] = {
     "Processor defined value",
     "Hash: Address of symbol hash table",
     "Offset of the string table",
-    "Address of the symbol table",
+    "Offset of the symbol table",
     "Address of Relocations with addend",
     "Total size of the relocations with addends table",
     "Size of one relocation entry",
@@ -298,7 +299,10 @@ void dumpDynamicEntry(const struct DynamicEntry *entry, const char *stringTable)
         printf("%s\n", stringTable + entry->value);
     }
     else if (entry->tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET) {
-        printf(".dynstr section offset (%lu)\n", entry->value);
+        printf(".dynstr section (%lu)\n", entry->value);
+    }
+    else if (entry->tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET) {
+        printf(".dynsym section (%lu)\n", entry->value);
     }
     else {
         printf("(%lu)\n", entry->value);
@@ -564,8 +568,13 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
             }
             else {
                 for (int i = 0; i < entryCount; i++) {
-                    if (dynamicEntries[i].tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET && (dynStrSection == NULL || dynStrSection->offset != dynamicEntries[i].value)) {
+                    const long tag = dynamicEntries[i].tag;
+                    if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET && (dynStrSection == NULL || dynStrSection->offset != dynamicEntries[i].value)) {
                         fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu", dynStrSection->offset);
+                        result = 1;
+                    }
+                    else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET && (dynSymSection == NULL || dynSymSection->offset != dynamicEntries[i].value)) {
+                        fprintf(stderr, "The offset of the symbol table was expected to match the .dynsym section, but it was %lu", dynSymSection->offset);
                         result = 1;
                     }
                 }
