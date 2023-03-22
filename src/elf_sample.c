@@ -248,10 +248,61 @@ void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry
     printf("\n  addend=%lu\n", entry->addend);
 }
 
-void dumpDynamicEntry(const struct DynamicEntry *entry) {
-    printf("(%lu)", entry->tag);
-    printf(": ");
-    printf("(%lu)\n", entry->value);
+#define DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES 35
+#define DYNAMIC_ENTRY_TAG_NEEDED 1
+#define DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET 5
+
+const char *dynamicEntryTagNames[DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES] = {
+    "?",
+    "Required library",
+    "Size in bytes of PLT relocations",
+    "Processor defined value",
+    "Hash: Address of symbol hash table",
+    "Offset of the string table",
+    "Address of the symbol table",
+    "Address of Relocations with addend",
+    "Total size of the relocations with addends table",
+    "Size of one relocation entry",
+    "Size of string table",
+    "Size of one symbol table entry",
+    "Address of init function",
+    "Address of termination function",
+    "Name of shared object",
+    "Library search path (deprecated)",
+    "Start symbol search here",
+    "Address of relocation without addend table",
+    "Total size of relocation without addend table",
+    "Size of one Relocation without addend entry",
+    "Type of relocation in PLT",
+    "For debugging; unspecified",
+    "Relocation might modify .text",
+    "Address of PLT relocations",
+    "Process relocations of object",
+    "Array with addresses of init fct",
+    "Array with addresses of fini fct",
+    "Size in bytes of the array with addresses of init fct",
+    "Size in bytes of the array with addresses of fini fct",
+    "Library search path",
+    "Flags for the object being loaded",
+    "?",
+    "Array with addresses of preinit fct",
+    "Size in bytes of the array with addresses of preinit fct",
+    "Address of SYMTAB_SHNDX section",
+};
+
+void dumpDynamicEntry(const struct DynamicEntry *entry, const char *stringTable) {
+    const unsigned int tagNameIndex = (entry->tag >= 0 && entry->tag < DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES)? entry->tag : 0;
+    printf("%s (%lu): ", dynamicEntryTagNames[tagNameIndex], entry->tag);
+
+    if (entry->tag == DYNAMIC_ENTRY_TAG_NEEDED) {
+        printf("%s\n", stringTable + entry->value);
+    }
+    else if (entry->tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET) {
+        printf(".dynstr section offset (%lu)\n", entry->value);
+    }
+    else {
+        printf("(%lu)\n", entry->value);
+    }
 }
 
 int readProgramEntries(FILE *file, struct ProgramEntry *entries, int entryCount) {
@@ -400,9 +451,9 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
     long symbolCount = 0;
     struct SymbolEntry64 *symbolEntries = NULL;
     char *symbolStringTable = NULL;
+    const struct SectionEntry *dynStrSection = NULL;
 
     if (!result && (dynSymSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynSymSectionEntry))) {
-        const struct SectionEntry *dynStrSection;
         if (!(dynStrSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynStrSectionEntry))) {
             fprintf(stderr, ".dynsym section found but .dynstr is missing\n");
             result = 1;
@@ -499,8 +550,8 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
 
     const struct SectionEntry *dynamicSection;
     if (!result && (dynamicSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynamicSectionEntry))) {
-        long symbolCount = dynamicSection->fileSize / DYNAMIC_TABLE_ENTRY_64_FILE_SIZE;
-        const long memoryToAllocate = sizeof(struct DynamicEntry) * symbolCount;
+        long entryCount = dynamicSection->fileSize / DYNAMIC_TABLE_ENTRY_64_FILE_SIZE;
+        const long memoryToAllocate = sizeof(struct DynamicEntry) * entryCount;
         struct DynamicEntry *dynamicEntries;
         if (!(dynamicEntries = malloc(memoryToAllocate))) {
             fprintf(stderr, "Unable to allocate %lu bytes for the dynamic table\n", memoryToAllocate);
@@ -508,14 +559,23 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
         }
 
         if (!result) {
-            if (readDynamicEntries(file, dynamicSection->offset, dynamicEntries, symbolCount)) {
+            if (readDynamicEntries(file, dynamicSection->offset, dynamicEntries, entryCount)) {
                 result = 1;
             }
             else {
-                printf("\nDynamic table (.dynamic):\n");
-                for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
-                    printf("#%u ", entryIndex);
-                    dumpDynamicEntry(dynamicEntries + entryIndex);
+                for (int i = 0; i < entryCount; i++) {
+                    if (dynamicEntries[i].tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET && (dynStrSection == NULL || dynStrSection->offset != dynamicEntries[i].value)) {
+                        fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu", dynStrSection->offset);
+                        result = 1;
+                    }
+                }
+
+                if (!result) {
+                    printf("\nDynamic table (.dynamic):\n");
+                    for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
+                        printf("#%u ", entryIndex);
+                        dumpDynamicEntry(dynamicEntries + entryIndex, symbolStringTable);
+                    }
                 }
             }
 
