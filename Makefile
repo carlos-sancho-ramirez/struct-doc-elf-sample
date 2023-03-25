@@ -2,6 +2,11 @@ build/bin/elf_sample: src/*.c build/include/elf_structs.h
 	mkdir -p build/bin
 	cc -o $@ -Ibuild/include src/*.c
 
+release: src/*.c build/include/elf_structs.h
+	mkdir -p build/bin
+	cc -O3 -o build/bin/elf_sample -Ibuild/include src/*.c
+	strip --strip-unneeded build/bin/elf_sample
+
 build/include/elf_structs.h:
 	mkdir -p build/include
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/Header > $@
@@ -14,7 +19,7 @@ build/include/elf_structs.h:
 	echo "" >> $@
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/SymbolEntry64 --in-types "w16=word16LittleEndian;w32=word32LittleEndian;w64=word64LittleEndian" >> $@
 	echo "" >> $@
-	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/RelocationEntryWithAddend --in-types "word=word64LittleEndian" >> $@
+	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/RelocationEntry64WithAddend --in-types "w64=word64LittleEndian" >> $@
 	echo "" >> $@
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/DynamicEntry --in-types "word=word64LittleEndian" >> $@
 

@@ -9,7 +9,7 @@
 #define PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE 56
 #define SECTION_HEADER_TABLE_ENTRY_FILE_SIZE 64
 #define SYMBOL_ENTRY_64_FILE_SIZE 24
-#define RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE 24
+#define RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE 24
 #define DYNAMIC_TABLE_ENTRY_64_FILE_SIZE 16
 
 #define SECTION_ENTRY_TYPE_SYMBOL_TABLE 2
@@ -146,9 +146,9 @@ int parseDynamicSymbolEntry(FILE *file, struct SymbolEntry64 *entry) {
     return 0;
 }
 
-int parseRelocationEntryWithAddend(FILE *file, struct RelocationEntryWithAddend *entry) {
-    char buffer[RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE];
-    if (fread(buffer, 1, RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE, file) < RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE) {
+int parseRelocationEntry64WithAddend(FILE *file, struct RelocationEntry64WithAddend *entry) {
+    char buffer[RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE];
+    if (fread(buffer, 1, RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE, file) < RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE) {
         fprintf(stderr, "Unexpected end of file\n");
         return 1;
     }
@@ -226,7 +226,7 @@ void dumpSymbolEntry64(const struct SymbolEntry64 *entry, const unsigned char *s
     printf("\n  other=%u\n  value=%lu\n  size=%lu\n", entry->other, entry->value, entry->size);
 }
 
-void dumpRelocationEntryWithAddend(const struct RelocationEntryWithAddend *entry, const struct SectionEntry *sections, int sectionCount, const char *stringTable, const struct SymbolEntry64 *symbols, const int symbolCount, const char *symbolStringTable) {
+void dumpRelocationEntry64WithAddend(const struct RelocationEntry64WithAddend *entry, const struct SectionEntry *sections, int sectionCount, const char *stringTable, const struct SymbolEntry64 *symbols, const int symbolCount, const char *symbolStringTable) {
     printf("RelocationEntryWithAddend:\n  address=%lu", entry->address);
     for (int sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++) {
         const struct SectionEntry *section = sections + sectionIndex;
@@ -385,14 +385,14 @@ int readDynamicSymbolEntries(FILE *file, long offset, struct SymbolEntry64 *entr
     return 0;
 }
 
-int readRelocationEntriesWithAddend(FILE *file, long offset, struct RelocationEntryWithAddend *entries, int entryCount) {
+int readRelocationEntries64WithAddend(FILE *file, long offset, struct RelocationEntry64WithAddend *entries, int entryCount) {
     if (fseek(file, offset, SEEK_SET)) {
         fprintf(stderr, "Unable to set file position at %lu\n", offset);
         return 1;
     }
 
     for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
-        if (parseRelocationEntryWithAddend(file, &entries[entryIndex])) {
+        if (parseRelocationEntry64WithAddend(file, &entries[entryIndex])) {
             return 1;
         }
     }
@@ -528,23 +528,23 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
 
     const struct SectionEntry *relaDynSection;
     if (!result && (relaDynSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isRelaDynSectionEntry))) {
-        long symbolCount = relaDynSection->fileSize / RELOCATION_ENTRY_WITH_ADDEND_64_FILE_SIZE;
-        const long memoryToAllocate = sizeof(struct RelocationEntryWithAddend) * symbolCount;
-        struct RelocationEntryWithAddend *relocationEntries;
+        long symbolCount = relaDynSection->fileSize / RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE;
+        const long memoryToAllocate = sizeof(struct RelocationEntry64WithAddend) * symbolCount;
+        struct RelocationEntry64WithAddend *relocationEntries;
         if (!(relocationEntries = malloc(memoryToAllocate))) {
             fprintf(stderr, "Unable to allocate %lu bytes for the relation table\n", memoryToAllocate);
             result = 1;
         }
 
         if (!result) {
-            if (readRelocationEntriesWithAddend(file, relaDynSection->offset, relocationEntries, symbolCount)) {
+            if (readRelocationEntries64WithAddend(file, relaDynSection->offset, relocationEntries, symbolCount)) {
                 result = 1;
             }
             else {
                 printf("\nRelocation table (.rela.dyn):\n");
                 for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
                     printf("#%u ", entryIndex);
-                    dumpRelocationEntryWithAddend(relocationEntries + entryIndex, sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, symbolEntries, symbolCount, symbolStringTable);
+                    dumpRelocationEntry64WithAddend(relocationEntries + entryIndex, sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, symbolEntries, symbolCount, symbolStringTable);
                 }
             }
 
