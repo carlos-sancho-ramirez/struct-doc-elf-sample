@@ -181,8 +181,55 @@ void dumpHeaderX(const struct HeaderX *headerX) {
     printf("HeaderX:\n  type=%u\n  machine=%u\n  version=%u\n  entry=%lu\n  programHeaderTable=%lu\n  sectionHeaderTable=%lu\n  flags=%u\n  headerSize=%u\n  programHeaderTableEntrySize=%u\n  programHeaderTableEntryCount=%u\n  sectionHeaderTableEntrySize=%u\n  sectionHeaderTableEntryCount=%u\n  sectionHeaderTableStringTableIndex=%u\n", (int) headerX->type, (int) headerX->machine, (int) headerX->version, headerX->entry, headerX->programHeaderTable, headerX->sectionHeaderTable, (int) headerX->flags, (int) headerX->headerSize, (int) headerX->programHeaderTableEntrySize, (int) headerX->programHeaderTableEntryCount, (int) headerX->sectionHeaderTableEntrySize, (int) headerX->sectionHeaderTableEntryCount, (int) headerX->sectionHeaderTableStringTableIndex);
 }
 
+#define PROGRAM_ENTRY_NUMBER_OF_TYPES 8
+
+const char *programEntryTypeNames[PROGRAM_ENTRY_NUMBER_OF_TYPES] = {
+    "Unused",
+    "Loadable segment",
+    "Dynamic linking information",
+    "Interpreter information",
+    "Auxiliary information",
+    "?",
+    "Program header table",
+    "Thread-local storage template"
+};
+
 void dumpProgramEntry(const struct ProgramEntry *entry) {
-    printf("ProgramEntry:\n  type=%u\n  flags=%u\n  offset=%lu\n  virtualAddress=%lu\n  physicalAddress=%lu\n  fileSize=%lu\n  memSize=%lu\n  alignment=%lu\n", entry->type, entry->flags, entry->offset, entry->virtualAddress, entry->physicalAddress, entry->fileSize, entry->memSize, entry->alignment);
+    const int type = entry->type;
+    printf("ProgramEntry:\n  type=%u", type);
+
+    if (type < PROGRAM_ENTRY_NUMBER_OF_TYPES) {
+        printf("\t\t# %s", programEntryTypeNames[type]);
+    }
+
+    const int flags = entry->flags;
+    printf("\n  flags=%u", flags);
+    if (flags & 7) {
+        printf("\t\t# ");
+        if (flags & 4) {
+            printf("Readable");
+        }
+
+        if (flags & 2) {
+            if (flags & 4) {
+                printf(" + Writable");
+            }
+            else {
+                printf("Writable");
+            }
+        }
+
+        if (flags & 1) {
+            if (flags & 6) {
+                printf(" + Executable");
+            }
+            else {
+                printf("Executable");
+            }
+        }
+    }
+
+    printf("\n  offset=%lu\n  virtualAddress=%lu\n  physicalAddress=%lu\n  fileSize=%lu\n  memSize=%lu\n  alignment=%lu\n", entry->offset, entry->virtualAddress, entry->physicalAddress, entry->fileSize, entry->memSize, entry->alignment);
 }
 
 void dumpSectionEntry(const struct SectionEntry *entry, const unsigned char *stringTable) {
