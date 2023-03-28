@@ -9,7 +9,10 @@ release: src/*.c build/include/elf_structs.h
 
 build/include/elf_structs.h:
 	mkdir -p build/include
-	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/Header > $@
+	echo "#ifndef _ELF_STRUCTS_H_" > $@
+	echo "#define _ELF_STRUCTS_H_" >> $@
+	echo "" >> $@
+	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/Header >> $@
 	echo "" >> $@
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/HeaderX --in-types "w16=word16LittleEndian;w32=word32LittleEndian;addr=word64LittleEndian;offset=word64LittleEndian" >> $@
 	echo "" >> $@
@@ -22,6 +25,8 @@ build/include/elf_structs.h:
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/RelocationEntry64WithAddend --in-types "w64=word64LittleEndian" >> $@
 	echo "" >> $@
 	../struct-doc-instancer/build/instancer --in-template ../struct-doc/elf/DynamicEntry --in-types "word=word64LittleEndian" >> $@
+	echo "" >> $@
+	echo "#endif // _ELF_STRUCTS_H_" >> $@
 
 clean:
 	rm -r build

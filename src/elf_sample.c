@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "sections.h"
+#include "program.h"
 
 #define HEADER_FILE_SIZE 16
 #define HEADERX_FILE_SIZE 48
@@ -11,6 +12,8 @@
 #define SYMBOL_ENTRY_64_FILE_SIZE 24
 #define RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE 24
 #define DYNAMIC_TABLE_ENTRY_64_FILE_SIZE 16
+
+#define PROGRAM_ENTRY_TYPE_DYNAMIC_LINKING_INFORMATION 2
 
 #define SECTION_ENTRY_TYPE_SYMBOL_TABLE 2
 #define SECTION_ENTRY_TYPE_STRING_TABLE 3
@@ -299,6 +302,9 @@ void dumpRelocationEntry64WithAddend(const struct RelocationEntry64WithAddend *e
 #define DYNAMIC_ENTRY_TAG_NEEDED 1
 #define DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET 5
 #define DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET 6
+#define DYNAMIC_ENTRY_TAG_RELADYN_TABLE_OFFSET 7
+#define DYNAMIC_ENTRY_TAG_STRING_TABLE_SIZE 10
+#define DYNAMIC_ENTRY_TAG_SYMBOL_ENTRY_FILE_SIZE 11
 
 const char *dynamicEntryTagNames[DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES] = {
     "?",
@@ -393,6 +399,10 @@ int readStringTable(FILE *file, const struct SectionEntry *stringTableSection, u
     return 0;
 }
 
+int isDynamicProgramEntry(const struct ProgramEntry *entry) {
+    return entry->type == PROGRAM_ENTRY_TYPE_DYNAMIC_LINKING_INFORMATION;
+}
+
 int isDynSymSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
     return entry->type == SECTION_ENTRY_TYPE_DYNAMIC_SYMBOL_TABLE && strcmp(".dynsym", stringTable + entry->name) == 0;
 }
@@ -482,10 +492,8 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
         return result;
     }
 
-    const struct SectionEntry *stringTableSection;
-    unsigned char *stringTable;
-    stringTableSection = sectionEntries + headerX->sectionHeaderTableStringTableIndex;
-    stringTable = malloc(stringTableSection->fileSize);
+    const struct SectionEntry *stringTableSection = sectionEntries + headerX->sectionHeaderTableStringTableIndex;
+    unsigned char *stringTable = malloc(stringTableSection->fileSize);
     if (!stringTable) {
         fprintf(stderr, "Unable to allocate %lu bytes\n", stringTableSection->fileSize);
         return 1;
@@ -498,18 +506,23 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
         }
     }
 
-    const struct SectionEntry *dynSymSection;
+    const struct SectionEntry *dynSymSection = NULL;
+    const struct SectionEntry *dynStrSection = NULL;
+    if (!result && (dynSymSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynSymSectionEntry)) && !(dynStrSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynStrSectionEntry))) {
+        fprintf(stderr, ".dynsym section found but .dynstr is missing\n");
+        result = 1;
+    }
+
+    const struct SectionEntry *relaDynSection = NULL;
+    if (!result) {
+        relaDynSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isRelaDynSectionEntry);
+    }
+
     long symbolCount = 0;
     struct SymbolEntry64 *symbolEntries = NULL;
     char *symbolStringTable = NULL;
-    const struct SectionEntry *dynStrSection = NULL;
 
-    if (!result && (dynSymSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynSymSectionEntry))) {
-        if (!(dynStrSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynStrSectionEntry))) {
-            fprintf(stderr, ".dynsym section found but .dynstr is missing\n");
-            result = 1;
-        }
-
+    if (!result && dynSymSection) {
         void *dynSymAllocatedMemory;
         if (!result) {
             symbolCount = dynSymSection->fileSize / SYMBOL_ENTRY_64_FILE_SIZE;
@@ -531,6 +544,66 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
                 for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
                     printf("#%u ", entryIndex);
                     dumpSymbolEntry64(symbolEntries + entryIndex, symbolStringTable);
+                }
+            }
+        }
+    }
+
+    struct DynamicEntry *dynamicEntries;
+    if (!result) {
+        const struct SectionEntry *dynamicSection;
+        if (dynamicSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynamicSectionEntry)) {
+            const struct ProgramEntry *dynamicSegment = findProgramEntry(programEntries, headerX->programHeaderTableEntryCount, isDynamicProgramEntry);
+            if (!dynamicSegment || dynamicSegment->offset != dynamicSection->offset || dynamicSegment->fileSize != dynamicSection->fileSize) {
+                fprintf(stderr, ".dynamic section offset or size does not match the same info in the program header table");
+                result = 1;
+            }
+            else {
+                const long entryCount = dynamicSection->fileSize / DYNAMIC_TABLE_ENTRY_64_FILE_SIZE;
+                const long memoryToAllocate = sizeof(struct DynamicEntry) * entryCount;
+                if (!(dynamicEntries = malloc(memoryToAllocate))) {
+                    fprintf(stderr, "Unable to allocate %lu bytes for the dynamic table\n", memoryToAllocate);
+                    result = 1;
+                }
+
+                if (!result) {
+                    if (readDynamicEntries(file, dynamicSection->offset, dynamicEntries, entryCount)) {
+                        result = 1;
+                    }
+                    else {
+                        for (int i = 0; i < entryCount; i++) {
+                            const long tag = dynamicEntries[i].tag;
+                            const long value = dynamicEntries[i].value;
+                            if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET && (dynStrSection == NULL || dynStrSection->offset != value)) {
+                                fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu", dynStrSection->offset);
+                                result = 1;
+                            }
+                            else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET && (dynSymSection == NULL || dynSymSection->offset != value)) {
+                                fprintf(stderr, "The offset of the symbol table was expected to match the .dynsym section, but it was %lu", dynSymSection->offset);
+                                result = 1;
+                            }
+                            else if (tag == DYNAMIC_ENTRY_TAG_RELADYN_TABLE_OFFSET && (relaDynSection == NULL || relaDynSection->offset != value)) {
+                                fprintf(stderr, "The offset of the relocations with addend table was expected to match the .rela.dyn section, but it was %lu", value);
+                                result = 1;
+                            }
+                            else if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_SIZE && (dynStrSection == NULL || dynStrSection->fileSize < value)) {
+                                fprintf(stderr, "The size of the string table was expected to match or be lower than the .dynsym section size, but it was %lu", value);
+                                result = 1;
+                            }
+                            else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_ENTRY_FILE_SIZE && value != SYMBOL_ENTRY_64_FILE_SIZE) {
+                                fprintf(stderr, "The size of one symbol was expected to be %u, but it was %lu", SYMBOL_ENTRY_64_FILE_SIZE, value);
+                                result = 1;
+                            }
+                        }
+
+                        if (!result) {
+                            printf("\nDynamic table (.dynamic):\n");
+                            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
+                                printf("#%u ", entryIndex);
+                                dumpDynamicEntry(dynamicEntries + entryIndex, symbolStringTable);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -573,8 +646,7 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
         }
     }
 
-    const struct SectionEntry *relaDynSection;
-    if (!result && (relaDynSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isRelaDynSectionEntry))) {
+    if (!result && relaDynSection) {
         long symbolCount = relaDynSection->fileSize / RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE;
         const long memoryToAllocate = sizeof(struct RelocationEntry64WithAddend) * symbolCount;
         struct RelocationEntry64WithAddend *relocationEntries;
@@ -599,48 +671,12 @@ int readProgramAndSectionEntries(FILE *file, void *memoryAllocated, struct Heade
         }
     }
 
-    const struct SectionEntry *dynamicSection;
-    if (!result && (dynamicSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynamicSectionEntry))) {
-        long entryCount = dynamicSection->fileSize / DYNAMIC_TABLE_ENTRY_64_FILE_SIZE;
-        const long memoryToAllocate = sizeof(struct DynamicEntry) * entryCount;
-        struct DynamicEntry *dynamicEntries;
-        if (!(dynamicEntries = malloc(memoryToAllocate))) {
-            fprintf(stderr, "Unable to allocate %lu bytes for the dynamic table\n", memoryToAllocate);
-            result = 1;
-        }
-
-        if (!result) {
-            if (readDynamicEntries(file, dynamicSection->offset, dynamicEntries, entryCount)) {
-                result = 1;
-            }
-            else {
-                for (int i = 0; i < entryCount; i++) {
-                    const long tag = dynamicEntries[i].tag;
-                    if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET && (dynStrSection == NULL || dynStrSection->offset != dynamicEntries[i].value)) {
-                        fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu", dynStrSection->offset);
-                        result = 1;
-                    }
-                    else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET && (dynSymSection == NULL || dynSymSection->offset != dynamicEntries[i].value)) {
-                        fprintf(stderr, "The offset of the symbol table was expected to match the .dynsym section, but it was %lu", dynSymSection->offset);
-                        result = 1;
-                    }
-                }
-
-                if (!result) {
-                    printf("\nDynamic table (.dynamic):\n");
-                    for (int entryIndex = 0; entryIndex < symbolCount; entryIndex++) {
-                        printf("#%u ", entryIndex);
-                        dumpDynamicEntry(dynamicEntries + entryIndex, symbolStringTable);
-                    }
-                }
-            }
-
-            free(dynamicEntries);
-        }
-    }
-
     if (symbolEntries) {
         free(symbolEntries);
+    }
+
+    if (dynamicEntries) {
+        free(dynamicEntries);
     }
 
     free(stringTable);
