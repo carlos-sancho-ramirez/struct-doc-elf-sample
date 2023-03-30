@@ -344,9 +344,40 @@ const char *dynamicEntryTagNames[DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES] = {
     "Address of SYMTAB_SHNDX section",
 };
 
+#define DYNAMIC_ENTRY_TAG_GNU_STYLE_HASH_TABLE 0x6FFFFEF5
+
+const char *dynamicEntryTagNamesFrom6FFFFEF5[] = {
+    "Offset of the GNU-style hash table",
+    "TLSDESC_PLT",
+    "TLSDESC_GOT",
+    "GNU_CONFLICT",
+    "GNU_LIBLIST",
+    "Configuration information",
+    "Dependency auditing",
+    "Object auditing",
+    "PLT padding",
+    "Move table",
+    "Syminfo table"
+};
+
+#define DYNAMIC_ENTRY_TAG_RELA_COUNT 0x6FFFFFF9
+
+const char *dynamicEntryTagNamesFrom6FFFFFF9[7] = {
+    "Number of Relocation entries with addend",
+    "Number of Relocation entries without addend",
+    "State flags",
+    "Address of version definition table",
+    "Number of version definitions",
+    "Address of table with needed versions",
+    "Number of needed versions"
+};
+
 void dumpDynamicEntry(const struct DynamicEntry *entry, const char *stringTable) {
-    const unsigned int tagNameIndex = (entry->tag >= 0 && entry->tag < DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES)? entry->tag : 0;
-    printf("%s (%lu): ", dynamicEntryTagNames[tagNameIndex], entry->tag);
+    const char *tagName = (entry->tag >= 0 && entry->tag < DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES)? dynamicEntryTagNames[entry->tag] :
+            (entry->tag >= DYNAMIC_ENTRY_TAG_GNU_STYLE_HASH_TABLE && entry-> tag <= 0x6FFFFEFF)? dynamicEntryTagNamesFrom6FFFFEF5[entry -> tag - DYNAMIC_ENTRY_TAG_GNU_STYLE_HASH_TABLE] :
+            (entry->tag >= DYNAMIC_ENTRY_TAG_RELA_COUNT && entry-> tag <= 0x6FFFFFFF)? dynamicEntryTagNamesFrom6FFFFFF9[entry -> tag - DYNAMIC_ENTRY_TAG_RELA_COUNT] :
+            "?";
+    printf("%s (0x%lx): ", tagName, entry->tag);
 
     if (entry->tag == DYNAMIC_ENTRY_TAG_NEEDED) {
         printf("%s\n", stringTable + entry->value);
@@ -358,7 +389,7 @@ void dumpDynamicEntry(const struct DynamicEntry *entry, const char *stringTable)
         printf(".dynsym section (%lu)\n", entry->value);
     }
     else {
-        printf("(%lu)\n", entry->value);
+        printf("%lu\n", entry->value);
     }
 }
 
