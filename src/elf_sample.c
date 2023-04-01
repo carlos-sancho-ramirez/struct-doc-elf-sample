@@ -199,8 +199,57 @@ typedef struct {
     struct RelocationEntry64WithAddend *relocationEntries;
 } FileDetails;
 
+#define HEADER_CLASS_32_BIT 1
+#define HEADER_CLASS_64_BIT 2
+
+#define HEADER_DATA_LITTLE_ENDIAN 1
+#define HEADER_DATA_BIG_ENDIAN 2
+
+const char *headerOsabiNames[] = {
+    "System V",
+    "HP-UX",
+    "NetBSD",
+    "Linux",
+    "GNU Hurd",
+    "?",
+    "Solaris",
+    "AIX (Monterey)",
+    "IRIX",
+    "FreeBSD",
+    "Tru64",
+    "Novell Modesto",
+    "OpenBSD",
+    "OpenVMS",
+    "NonStop Kernel",
+    "AROS",
+    "FenixOS",
+    "Nuxi CloudABI",
+    "Stratus Technologies OpenVOS"
+};
+
 void dumpHeader(const struct Header *header) {
-    printf("Header:\n  class=%u\n  data=%u\n  version=%u\n  osabi=%u\n  abiVersion=%u\n", (int) header->class, (int) header->data, (int) header->version, (int) header->osabi, (int) header->abiVersion);
+    printf("Header:\n  class=%u", (int) header->class);
+    if (header->class == HEADER_CLASS_32_BIT) {
+        printf("\t\t# 32 bits");
+    }
+    else if (header->class == HEADER_CLASS_64_BIT) {
+        printf("\t\t# 64 bits");
+    }
+
+    printf("\n  data=%u", (int) header->data);
+    if (header->data == HEADER_DATA_LITTLE_ENDIAN) {
+        printf("\t\t# Little Endian");
+    }
+    else if (header->data == HEADER_DATA_BIG_ENDIAN) {
+        printf("\t\t# Big Endian");
+    }
+
+    printf("\n  version=%u\n  osabi=%u", (int) header->version, (int) header->osabi);
+    if (header->osabi < sizeof(headerOsabiNames) / sizeof(char *)) {
+        printf("\t\t# %s", headerOsabiNames[header->osabi]);
+    }
+
+    printf("\n  abiVersion=%u\n", (int) header->abiVersion);
 }
 
 void dumpHeaderX(const struct HeaderX *headerX) {
