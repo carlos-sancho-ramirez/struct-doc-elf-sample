@@ -252,8 +252,189 @@ void dumpHeader(const struct Header *header) {
     printf("\n  abiVersion=%u\n", (int) header->abiVersion);
 }
 
+const char *headerXTypeNames[] = {
+    "Relocatable file",
+    "Executable file",
+    "Shared object",
+    "Core file"
+};
+
+const short headerXMachineKeys[] = {
+0x01,
+0x02,
+0x03,
+0x04,
+0x05,
+0x06,
+0x07,
+0x08,
+0x09,
+0x0A,
+0x0E,
+0x13,
+0x14,
+0x15,
+0x16,
+0x17,
+0x24,
+0x25,
+0x26,
+0x27,
+0x28,
+0x29,
+0x2A,
+0x2B,
+0x2C,
+0x2D,
+0x2E,
+0x2F,
+0x30,
+0x31,
+0x32,
+0x33,
+0x34,
+0x35,
+0x36,
+0x37,
+0x38,
+0x39,
+0x3A,
+0x3B,
+0x3C,
+0x3D,
+0x3E,
+0x3F,
+0x40,
+0x41,
+0x42,
+0x43,
+0x44,
+0x45,
+0x46,
+0x47,
+0x48,
+0x49,
+0x4A,
+0x4B,
+0x4C,
+0x4D,
+0x4E,
+0x4F,
+0x8C,
+0xAF,
+0xB7,
+0xDC,
+0xF3,
+0xF7,
+0x101
+};
+
+const char *headerXMachineNames[] = {
+    "AT&T WE 32100",
+    "SPARC",
+    "x86",
+    "Motorola 68000 (M68k)",
+    "Motorola 88000 (M88k)",
+    "Intel MCU",
+    "Intel 80860",
+    "MIPS",
+    "IBM System/370",
+    "MIPS RS3000 Little-endian",
+    "Hewlett-Packard PA-RISC",
+    "Intel 80960",
+    "PowerPC",
+    "PowerPC (64-bit)",
+    "S390, including S390x",
+    "IBM SPU/SPC",
+    "NEC V800",
+    "Fujitsu FR20",
+    "TRW RH-32",
+    "Motorola RCE",
+    "Arm (up to Armv7/AArch32)",
+    "Digital Alpha",
+    "SuperH",
+    "SPARC Version 9",
+    "Siemens TriCore embedded processor",
+    "Argonaut RISC Core",
+    "Hitachi H8/300",
+    "Hitachi H8/300H",
+    "Hitachi H8S",
+    "Hitachi H8/500",
+    "IA-64",
+    "Stanford MIPS-X",
+    "Motorola ColdFire",
+    "Motorola M68HC12",
+    "Fujitsu MMA Multimedia Accelerator",
+    "Siemens PCP",
+    "Sony nCPU embedded RISC processor",
+    "Denso NDR1 microprocessor",
+    "Motorola Star*Core processor",
+    "Toyota ME16 processor",
+    "STMicroelectronics ST100 processor",
+    "Advanced Logic Corp. TinyJ embedded processor family",
+    "AMD x86-64",
+    "Sony DSP Processor",
+    "Digital Equipment Corp. PDP-10",
+    "Digital Equipment Corp. PDP-11",
+    "Siemens FX66 microcontroller",
+    "STMicroelectronics ST9+ 8/16 bit microcontroller",
+    "STMicroelectronics ST7 8-bit microcontroller",
+    "Motorola MC68HC16 Microcontroller",
+    "Motorola MC68HC11 Microcontroller",
+    "Motorola MC68HC08 Microcontroller",
+    "Motorola MC68HC05 Microcontroller",
+    "Silicon Graphics SVx",
+    "STMicroelectronics ST19 8-bit microcontroller",
+    "Digital VAX",
+    "Axis Communications 32-bit embedded processor",
+    "Infineon Technologies 32-bit embedded processor",
+    "Element 14 64-bit DSP Processor",
+    "LSI Logic 16-bit DSP Processor",
+    "TMS320C6000 Family",
+    "MCST Elbrus e2k",
+    "Arm 64-bits (Armv8/AArch64)",
+    "Zilog Z80",
+    "RISC-V",
+    "Berkeley Packet Filter",
+    "WDC 65C816"
+};
+
+static const char *findValueForKey(const short *keys, const char **values, int size, short key) {
+    while (size > 0) {
+        int index = size / 2;
+        const short thisKey = keys[index];
+        if (key == thisKey) {
+            return values[index];
+        }
+        else if (key < thisKey) {
+            size /= 2;
+        }
+        else {
+            keys += index + 1;
+            values += index + 1;
+            size = (size - 1) / 2;
+        }
+    }
+
+    return NULL;
+}
+
 void dumpHeaderX(const struct HeaderX *headerX) {
-    printf("HeaderX:\n  type=%u\n  machine=%u\n  version=%u\n  entry=%lu\n  programHeaderTable=%lu\n  sectionHeaderTable=%lu\n  flags=%u\n  headerSize=%u\n  programHeaderTableEntrySize=%u\n  programHeaderTableEntryCount=%u\n  sectionHeaderTableEntrySize=%u\n  sectionHeaderTableEntryCount=%u\n  sectionHeaderTableStringTableIndex=%u\n", (int) headerX->type, (int) headerX->machine, (int) headerX->version, headerX->entry, headerX->programHeaderTable, headerX->sectionHeaderTable, (int) headerX->flags, (int) headerX->headerSize, (int) headerX->programHeaderTableEntrySize, (int) headerX->programHeaderTableEntryCount, (int) headerX->sectionHeaderTableEntrySize, (int) headerX->sectionHeaderTableEntryCount, (int) headerX->sectionHeaderTableStringTableIndex);
+    const int type = headerX->type;
+    printf("HeaderX:\n  type=%u", type);
+
+    if (type > 0 && type <= 4) {
+        printf("\t\t# %s", headerXTypeNames[type - 1]);
+    }
+
+    printf("\n  machine=%u", (int) headerX->machine);
+
+    const char *machineName = findValueForKey(headerXMachineKeys, headerXMachineNames, sizeof(headerXMachineKeys) / sizeof(short), headerX->machine);
+    if (machineName) {
+        printf("\t\t# %s", machineName);
+    }
+
+    printf("\n  version=%u\n  entry=%lu\n  programHeaderTable=%lu\n  sectionHeaderTable=%lu\n  flags=%u\n  headerSize=%u\n  programHeaderTableEntrySize=%u\n  programHeaderTableEntryCount=%u\n  sectionHeaderTableEntrySize=%u\n  sectionHeaderTableEntryCount=%u\n  sectionHeaderTableStringTableIndex=%u\n", (int) headerX->version, headerX->entry, headerX->programHeaderTable, headerX->sectionHeaderTable, (int) headerX->flags, (int) headerX->headerSize, (int) headerX->programHeaderTableEntrySize, (int) headerX->programHeaderTableEntryCount, (int) headerX->sectionHeaderTableEntrySize, (int) headerX->sectionHeaderTableEntryCount, (int) headerX->sectionHeaderTableStringTableIndex);
 }
 
 #define PROGRAM_ENTRY_NUMBER_OF_TYPES 8
@@ -654,7 +835,7 @@ int readProgramAndSectionEntries(FILE *file, FileDetails *fileDetails) {
     if (dynamicSection = findSectionEntry(sectionEntries, headerX->sectionHeaderTableEntryCount, stringTable, isDynamicSectionEntry)) {
         const struct ProgramEntry *dynamicSegment = findProgramEntry(programEntries, headerX->programHeaderTableEntryCount, isDynamicProgramEntry);
         if (!dynamicSegment || dynamicSegment->offset != dynamicSection->offset || dynamicSegment->fileSize != dynamicSection->fileSize) {
-            fprintf(stderr, ".dynamic section offset or size does not match the same info in the program header table");
+            fprintf(stderr, ".dynamic section offset or size does not match the same info in the program header table\n");
             return 1;
         }
 
@@ -674,23 +855,23 @@ int readProgramAndSectionEntries(FILE *file, FileDetails *fileDetails) {
             const long tag = dynamicEntries[i].tag;
             const long value = dynamicEntries[i].value;
             if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET && (dynStrSection == NULL || dynStrSection->offset != value)) {
-                fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu", dynStrSection->offset);
+                fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu\n", dynStrSection->offset);
                 return 1;
             }
             else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET && (dynSymSection == NULL || dynSymSection->offset != value)) {
-                fprintf(stderr, "The offset of the symbol table was expected to match the .dynsym section, but it was %lu", dynSymSection->offset);
+                fprintf(stderr, "The offset of the symbol table was expected to match the .dynsym section, but it was %lu\n", dynSymSection->offset);
                 return 1;
             }
             else if (tag == DYNAMIC_ENTRY_TAG_RELADYN_TABLE_OFFSET && (relaDynSection == NULL || relaDynSection->offset != value)) {
-                fprintf(stderr, "The offset of the relocations with addend table was expected to match the .rela.dyn section, but it was %lu", value);
+                fprintf(stderr, "The offset of the relocations with addend table was expected to match the .rela.dyn section, but it was %lu\n", value);
                 return 1;
             }
             else if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_SIZE && (dynStrSection == NULL || dynStrSection->fileSize < value)) {
-                fprintf(stderr, "The size of the string table was expected to match or be lower than the .dynsym section size, but it was %lu", value);
+                fprintf(stderr, "The size of the string table was expected to match or be lower than the .dynsym section size, but it was %lu\n", value);
                 return 1;
             }
             else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_ENTRY_FILE_SIZE && value != SYMBOL_ENTRY_64_FILE_SIZE) {
-                fprintf(stderr, "The size of one symbol was expected to be %u, but it was %lu", SYMBOL_ENTRY_64_FILE_SIZE, value);
+                fprintf(stderr, "The size of one symbol was expected to be %u, but it was %lu\n", SYMBOL_ENTRY_64_FILE_SIZE, value);
                 return 1;
             }
         }
