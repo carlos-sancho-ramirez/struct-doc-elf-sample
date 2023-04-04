@@ -556,9 +556,9 @@ void dumpRelocationEntry64WithAddend(const FileDetails *fileDetails, long reloca
 
 #define DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES 35
 #define DYNAMIC_ENTRY_TAG_NEEDED 1
-#define DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET 5
-#define DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET 6
-#define DYNAMIC_ENTRY_TAG_RELADYN_TABLE_OFFSET 7
+#define DYNAMIC_ENTRY_TAG_STRING_TABLE_ADDRESS 5
+#define DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_ADDRESS 6
+#define DYNAMIC_ENTRY_TAG_RELADYN_TABLE_ADDRESS 7
 #define DYNAMIC_ENTRY_TAG_STRING_TABLE_SIZE 10
 #define DYNAMIC_ENTRY_TAG_SYMBOL_ENTRY_FILE_SIZE 11
 
@@ -568,8 +568,8 @@ const char *dynamicEntryTagNames[DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES] = {
     "Size in bytes of PLT relocations",
     "Processor defined value",
     "Hash: Address of symbol hash table",
-    "Offset of the string table",
-    "Offset of the symbol table",
+    "Address of the string table",
+    "Address of the symbol table",
     "Address of Relocations with addend",
     "Total size of the relocations with addends table",
     "Size of one relocation entry",
@@ -603,7 +603,7 @@ const char *dynamicEntryTagNames[DYNAMIC_ENTRY_NUMBER_OF_TAG_NAMES] = {
 #define DYNAMIC_ENTRY_TAG_GNU_STYLE_HASH_TABLE 0x6FFFFEF5
 
 const char *dynamicEntryTagNamesFrom6FFFFEF5[] = {
-    "Offset of the GNU-style hash table",
+    "Address of the GNU-style hash table",
     "TLSDESC_PLT",
     "TLSDESC_GOT",
     "GNU_CONFLICT",
@@ -638,10 +638,10 @@ void dumpDynamicEntry(const struct DynamicEntry *entry, const char *stringTable)
     if (entry->tag == DYNAMIC_ENTRY_TAG_NEEDED) {
         printf("%s\n", stringTable + entry->value);
     }
-    else if (entry->tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET) {
+    else if (entry->tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_ADDRESS) {
         printf(".dynstr section (%lu)\n", entry->value);
     }
-    else if (entry->tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET) {
+    else if (entry->tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_ADDRESS) {
         printf(".dynsym section (%lu)\n", entry->value);
     }
     else {
@@ -854,15 +854,15 @@ int readProgramAndSectionEntries(FILE *file, FileDetails *fileDetails) {
         for (int i = 0; i < entryCount; i++) {
             const long tag = dynamicEntries[i].tag;
             const long value = dynamicEntries[i].value;
-            if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_OFFSET && (dynStrSection == NULL || dynStrSection->offset != value)) {
-                fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu\n", dynStrSection->offset);
+            if (tag == DYNAMIC_ENTRY_TAG_STRING_TABLE_ADDRESS && (dynStrSection == NULL || dynStrSection->virtualAddress != value)) {
+                fprintf(stderr, "The offset of the string table was expected to match the .dynstr section, but it was %lu\n", value);
                 return 1;
             }
-            else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_OFFSET && (dynSymSection == NULL || dynSymSection->offset != value)) {
-                fprintf(stderr, "The offset of the symbol table was expected to match the .dynsym section, but it was %lu\n", dynSymSection->offset);
+            else if (tag == DYNAMIC_ENTRY_TAG_SYMBOL_TABLE_ADDRESS && (dynSymSection == NULL || dynSymSection->virtualAddress != value)) {
+                fprintf(stderr, "The offset of the symbol table was expected to match the .dynsym section, but it was %lu\n", value);
                 return 1;
             }
-            else if (tag == DYNAMIC_ENTRY_TAG_RELADYN_TABLE_OFFSET && (relaDynSection == NULL || relaDynSection->offset != value)) {
+            else if (tag == DYNAMIC_ENTRY_TAG_RELADYN_TABLE_ADDRESS && (relaDynSection == NULL || relaDynSection->virtualAddress != value)) {
                 fprintf(stderr, "The offset of the relocations with addend table was expected to match the .rela.dyn section, but it was %lu\n", value);
                 return 1;
             }
