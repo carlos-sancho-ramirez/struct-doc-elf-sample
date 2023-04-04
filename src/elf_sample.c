@@ -419,7 +419,13 @@ static const char *findValueForKey(const short *keys, const char **values, int s
     return NULL;
 }
 
-void dumpHeaderX(const struct HeaderX *headerX) {
+static int isAddressInSection(const struct SectionEntry *section, const void *entryAddress) {
+    const long addr = *((const long *) entryAddress);
+    return addr >= section->virtualAddress && addr < (section->virtualAddress + section->fileSize);
+}
+
+void dumpHeaderX(const FileDetails *fileDetails) {
+    const struct HeaderX *headerX = &fileDetails->headerX;
     const int type = headerX->type;
     printf("HeaderX:\n  type=%u", type);
 
@@ -434,7 +440,15 @@ void dumpHeaderX(const struct HeaderX *headerX) {
         printf("\t\t# %s", machineName);
     }
 
-    printf("\n  version=%u\n  entry=%lu\n  programHeaderTable=%lu\n  sectionHeaderTable=%lu\n  flags=%u\n  headerSize=%u\n  programHeaderTableEntrySize=%u\n  programHeaderTableEntryCount=%u\n  sectionHeaderTableEntrySize=%u\n  sectionHeaderTableEntryCount=%u\n  sectionHeaderTableStringTableIndex=%u\n", (int) headerX->version, headerX->entry, headerX->programHeaderTable, headerX->sectionHeaderTable, (int) headerX->flags, (int) headerX->headerSize, (int) headerX->programHeaderTableEntrySize, (int) headerX->programHeaderTableEntryCount, (int) headerX->sectionHeaderTableEntrySize, (int) headerX->sectionHeaderTableEntryCount, (int) headerX->sectionHeaderTableStringTableIndex);
+    printf("\n  version=%u\n  entry=%lu", (int) headerX->version, headerX->entry);
+
+    const short sectionCount = headerX->sectionHeaderTableEntryCount;
+    const struct SectionEntry *section = findSectionEntry(fileDetails->sectionEntries, sectionCount, &headerX->entry, isAddressInSection);
+    if (section) {
+        printf("\t\t# %s + 0x%lx", fileDetails->stringTable + section->name, headerX->entry - section->virtualAddress);
+    }
+
+    printf("\n  programHeaderTable=%lu\n  sectionHeaderTable=%lu\n  flags=%u\n  headerSize=%u\n  programHeaderTableEntrySize=%u\n  programHeaderTableEntryCount=%u\n  sectionHeaderTableEntrySize=%u\n  sectionHeaderTableEntryCount=%u\n  sectionHeaderTableStringTableIndex=%u\n", headerX->programHeaderTable, headerX->sectionHeaderTable, (int) headerX->flags, (int) headerX->headerSize, (int) headerX->programHeaderTableEntrySize, (int) headerX->programHeaderTableEntryCount, (int) headerX->sectionHeaderTableEntrySize, (int) headerX->sectionHeaderTableEntryCount, (int) headerX->sectionHeaderTableStringTableIndex);
 }
 
 #define PROGRAM_ENTRY_NUMBER_OF_TYPES 8
@@ -533,13 +547,11 @@ void dumpRelocationEntry64WithAddend(const FileDetails *fileDetails, long reloca
     const struct RelocationEntry64WithAddend *entry = fileDetails->relocationEntries + relocationIndex;
     const long entryAddress = entry->address;
     printf("RelocationEntryWithAddend:\n  address=%lu", entryAddress);
+
     const short sectionCount = fileDetails->headerX.sectionHeaderTableEntryCount;
-    for (int sectionIndex = 0; sectionIndex < sectionCount; sectionIndex++) {
-        const struct SectionEntry *section = fileDetails->sectionEntries + sectionIndex;
-        const long sectionAddress = section->virtualAddress;
-        if (entryAddress >= sectionAddress && entryAddress < (sectionAddress + section->fileSize)) {
-            printf("\t\t#%s + 0x%lx", fileDetails->stringTable + section->name, entryAddress - sectionAddress);
-        }
+    const struct SectionEntry *section = findSectionEntry(fileDetails->sectionEntries, sectionCount, &entryAddress, isAddressInSection);
+    if (section) {
+        printf("\t\t# %s + 0x%lx", fileDetails->stringTable + section->name, entryAddress - section->virtualAddress);
     }
 
     printf("\n  info=0x%lx", entry->info);
@@ -687,27 +699,27 @@ int isDynamicProgramEntry(const struct ProgramEntry *entry) {
     return entry->type == PROGRAM_ENTRY_TYPE_DYNAMIC_LINKING_INFORMATION;
 }
 
-int isDynSymSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+int isDynSymSectionEntry(const struct SectionEntry *entry, const void *stringTable) {
     return entry->type == SECTION_ENTRY_TYPE_DYNAMIC_SYMBOL_TABLE && strcmp(".dynsym", stringTable + entry->name) == 0;
 }
 
-int isDynStrSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+int isDynStrSectionEntry(const struct SectionEntry *entry, const void *stringTable) {
     return entry->type == SECTION_ENTRY_TYPE_STRING_TABLE && strcmp(".dynstr", stringTable + entry->name) == 0;
 }
 
-int isSymTabSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+int isSymTabSectionEntry(const struct SectionEntry *entry, const void *stringTable) {
     return entry->type == SECTION_ENTRY_TYPE_SYMBOL_TABLE && strcmp(".symtab", stringTable + entry->name) == 0;
 }
 
-int isStrTabSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+int isStrTabSectionEntry(const struct SectionEntry *entry, const void *stringTable) {
     return entry->type == SECTION_ENTRY_TYPE_STRING_TABLE && strcmp(".strtab", stringTable + entry->name) == 0;
 }
 
-int isRelaDynSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+int isRelaDynSectionEntry(const struct SectionEntry *entry, const void *stringTable) {
     return entry->type == SECTION_ENTRY_TYPE_RELOCATION_TABLE_WITH_ADDENDS && strcmp(".rela.dyn", stringTable + entry->name) == 0;
 }
 
-int isDynamicSectionEntry(const struct SectionEntry *entry, const char *stringTable) {
+int isDynamicSectionEntry(const struct SectionEntry *entry, const void *stringTable) {
     return entry->type == SECTION_ENTRY_TYPE_DYNAMIC_TABLE && strcmp(".dynamic", stringTable + entry->name) == 0;
 }
 
@@ -995,7 +1007,7 @@ int main(int argc, const char *argv[]) {
         dumpHeader(&(fileDetails.header));
 
         printf("\n");
-        dumpHeaderX(&(fileDetails.headerX));
+        dumpHeaderX(&fileDetails);
 
         printf("\nProgram table:\n");
         for (int entryIndex = 0; entryIndex < fileDetails.headerX.programHeaderTableEntryCount; entryIndex++) {
