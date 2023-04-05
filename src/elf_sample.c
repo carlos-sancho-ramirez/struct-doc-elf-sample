@@ -4,6 +4,7 @@
 #include <string.h>
 #include "sections.h"
 #include "program.h"
+#include "symbols.h"
 
 #define HEADER_FILE_SIZE 16
 #define HEADERX_FILE_SIZE 48
@@ -424,6 +425,11 @@ static int isAddressInSection(const struct SectionEntry *section, const void *en
     return addr >= section->virtualAddress && addr < (section->virtualAddress + section->fileSize);
 }
 
+static int isMatchingFunctionSymbol(const struct SymbolEntry64 *symbol, const void *rawVirtualAddress) {
+    const long addr = *((const long *) rawVirtualAddress);
+    return (symbol->info & 0x0F) == 2 && symbol->value == addr;
+}
+
 void dumpHeaderX(const FileDetails *fileDetails) {
     const struct HeaderX *headerX = &fileDetails->headerX;
     const int type = headerX->type;
@@ -444,8 +450,15 @@ void dumpHeaderX(const FileDetails *fileDetails) {
 
     const short sectionCount = headerX->sectionHeaderTableEntryCount;
     const struct SectionEntry *section = findSectionEntry(fileDetails->sectionEntries, sectionCount, &headerX->entry, isAddressInSection);
-    if (section) {
+    const struct SymbolEntry64 *entrySymbol = findSymbolEntry64(fileDetails->symbolTabEntries, fileDetails->symbolTabCount, &headerX->entry, isMatchingFunctionSymbol);
+    if (section && entrySymbol) {
+        printf("\t\t# %s at %s + 0x%lx", fileDetails->symbolTabStringTable + entrySymbol->name, fileDetails->stringTable + section->name, headerX->entry - section->virtualAddress);
+    }
+    else if (section) {
         printf("\t\t# %s + 0x%lx", fileDetails->stringTable + section->name, headerX->entry - section->virtualAddress);
+    }
+    else if (entrySymbol) {
+        printf("\t\t# %s", fileDetails->symbolTabStringTable + entrySymbol->name);
     }
 
     printf("\n  programHeaderTable=%lu\n  sectionHeaderTable=%lu\n  flags=%u\n  headerSize=%u\n  programHeaderTableEntrySize=%u\n  programHeaderTableEntryCount=%u\n  sectionHeaderTableEntrySize=%u\n  sectionHeaderTableEntryCount=%u\n  sectionHeaderTableStringTableIndex=%u\n", headerX->programHeaderTable, headerX->sectionHeaderTable, (int) headerX->flags, (int) headerX->headerSize, (int) headerX->programHeaderTableEntrySize, (int) headerX->programHeaderTableEntryCount, (int) headerX->sectionHeaderTableEntrySize, (int) headerX->sectionHeaderTableEntryCount, (int) headerX->sectionHeaderTableStringTableIndex);
