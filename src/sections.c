@@ -1,5 +1,5 @@
 #include <stddef.h>
-#include "elf_structs.h"
+#include "../build/src/elf_structs.h"
 
 const struct SectionEntry *findSectionEntry(const struct SectionEntry *entries, int count, const void *extra, int (* predicate)(const struct SectionEntry *, const void *)) {
     for (int i = 0; i < count; i++) {

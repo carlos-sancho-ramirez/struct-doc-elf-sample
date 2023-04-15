@@ -5,6 +5,8 @@
 #include "sections.h"
 #include "program.h"
 #include "symbols.h"
+#include "parsers.h"
+#include "readers.h"
 
 #define HEADER_FILE_SIZE 16
 #define HEADERX_FILE_SIZE 48
@@ -39,140 +41,6 @@ int parseHeader(FILE *file, struct Header *header) {
     header->version = buffer[6];
     header->osabi = buffer[7];
     header->abiVersion = buffer[8];
-
-    return 0;
-}
-
-uint16_t readWord16LittleEndian(const void *addr) {
-    const unsigned char *casted = (const unsigned char *) addr;
-    uint16_t result = casted[1];
-    return (result << 8) + casted[0];
-}
-
-uint32_t readWord32LittleEndian(const void *addr) {
-    const unsigned char *casted = (const unsigned char *) addr;
-    uint32_t result = casted[3];
-    for (int i = 2; i >= 0; i--) {
-        result = (result << 8) + casted[i];
-    }
-
-    return result;
-}
-
-uint64_t readWord64LittleEndian(const void *addr) {
-    const unsigned char *casted = (const unsigned char *) addr;
-    uint64_t result = casted[7];
-    for (int i = 6; i >= 0; i--) {
-        result = (result << 8) + casted[i];
-    }
-
-    return result;
-}
-
-int parseHeaderX(FILE *file, struct HeaderX *headerX) {
-    char buffer[HEADERX_FILE_SIZE];
-    if (fread(buffer, 1, HEADERX_FILE_SIZE, file) < HEADERX_FILE_SIZE) {
-        fprintf(stderr, "Unexpected end of file\n");
-        return 1;
-    }
-
-    headerX->type = readWord16LittleEndian(buffer);
-    headerX->machine = readWord16LittleEndian(buffer + 2);
-    headerX->version = readWord32LittleEndian(buffer + 4);
-    headerX->entry = readWord64LittleEndian(buffer + 8);
-    headerX->programHeaderTable = readWord64LittleEndian(buffer + 16);
-    headerX->sectionHeaderTable = readWord64LittleEndian(buffer + 24);
-    headerX->flags = readWord32LittleEndian(buffer + 32);
-    headerX->headerSize = readWord16LittleEndian(buffer + 36);
-    headerX->programHeaderTableEntrySize = readWord16LittleEndian(buffer + 38);
-    headerX->programHeaderTableEntryCount = readWord16LittleEndian(buffer + 40);
-    headerX->sectionHeaderTableEntrySize = readWord16LittleEndian(buffer + 42);
-    headerX->sectionHeaderTableEntryCount = readWord16LittleEndian(buffer + 44);
-    headerX->sectionHeaderTableStringTableIndex = readWord16LittleEndian(buffer + 46);
-
-    return 0;
-}
-
-int parseProgramEntry(FILE *file, struct ProgramEntry *entry) {
-    char buffer[PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE];
-    if (fread(buffer, 1, PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE, file) < PROGRAM_HEADER_TABLE_ENTRY_FILE_SIZE) {
-        fprintf(stderr, "Unexpected end of file\n");
-        return 1;
-    }
-
-    entry->type = readWord32LittleEndian(buffer);
-    entry->flags = readWord32LittleEndian(buffer + 4);
-    entry->offset = readWord64LittleEndian(buffer + 8);
-    entry->virtualAddress = readWord64LittleEndian(buffer + 16);
-    entry->physicalAddress = readWord64LittleEndian(buffer + 24);
-    entry->fileSize = readWord64LittleEndian(buffer + 32);
-    entry->memSize = readWord64LittleEndian(buffer + 40);
-    entry->alignment = readWord64LittleEndian(buffer + 48);
-
-    return 0;
-}
-
-int parseSectionEntry(FILE *file, struct SectionEntry *entry) {
-    char buffer[SECTION_HEADER_TABLE_ENTRY_FILE_SIZE];
-    if (fread(buffer, 1, SECTION_HEADER_TABLE_ENTRY_FILE_SIZE, file) < SECTION_HEADER_TABLE_ENTRY_FILE_SIZE) {
-        fprintf(stderr, "Unexpected end of file\n");
-        return 1;
-    }
-
-    entry->name = readWord32LittleEndian(buffer);
-    entry->type = readWord32LittleEndian(buffer + 4);
-    entry->flags = readWord32LittleEndian(buffer + 8);
-    entry->virtualAddress = readWord64LittleEndian(buffer + 16);
-    entry->offset = readWord64LittleEndian(buffer + 24);
-    entry->fileSize = readWord64LittleEndian(buffer + 32);
-    entry->link = readWord32LittleEndian(buffer + 40);
-    entry->info = readWord32LittleEndian(buffer + 44);
-    entry->alignment = readWord64LittleEndian(buffer + 48);
-    entry->entrySize = readWord64LittleEndian(buffer + 56);
-
-    return 0;
-}
-
-int parseDynamicSymbolEntry(FILE *file, struct SymbolEntry64 *entry) {
-    char buffer[SYMBOL_ENTRY_64_FILE_SIZE];
-    if (fread(buffer, 1, SYMBOL_ENTRY_64_FILE_SIZE, file) < SYMBOL_ENTRY_64_FILE_SIZE) {
-        fprintf(stderr, "Unexpected end of file\n");
-        return 1;
-    }
-
-    entry->name = readWord32LittleEndian(buffer);
-    entry->info = buffer[4];
-    entry->other = buffer[5];
-    entry->sectionIndex = readWord16LittleEndian(buffer + 6);
-    entry->value = readWord64LittleEndian(buffer + 8);
-    entry->size = readWord64LittleEndian(buffer + 16);
-
-    return 0;
-}
-
-int parseRelocationEntry64WithAddend(FILE *file, struct RelocationEntry64WithAddend *entry) {
-    char buffer[RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE];
-    if (fread(buffer, 1, RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE, file) < RELOCATION_ENTRY_64_WITH_ADDEND_FILE_SIZE) {
-        fprintf(stderr, "Unexpected end of file\n");
-        return 1;
-    }
-
-    entry->address = readWord64LittleEndian(buffer);
-    entry->info = readWord64LittleEndian(buffer + 8);
-    entry->addend = readWord64LittleEndian(buffer + 16);
-
-    return 0;
-}
-
-int parseDynamicEntry(FILE *file, struct DynamicEntry *entry) {
-    char buffer[DYNAMIC_TABLE_ENTRY_64_FILE_SIZE];
-    if (fread(buffer, 1, DYNAMIC_TABLE_ENTRY_64_FILE_SIZE, file) < DYNAMIC_TABLE_ENTRY_64_FILE_SIZE) {
-        fprintf(stderr, "Unexpected end of file\n");
-        return 1;
-    }
-
-    entry->tag = readWord64LittleEndian(buffer);
-    entry->value = readWord64LittleEndian(buffer + 8);
 
     return 0;
 }
@@ -736,14 +604,14 @@ int isDynamicSectionEntry(const struct SectionEntry *entry, const void *stringTa
     return entry->type == SECTION_ENTRY_TYPE_DYNAMIC_TABLE && strcmp(".dynamic", stringTable + entry->name) == 0;
 }
 
-int readDynamicSymbolEntries(FILE *file, long offset, struct SymbolEntry64 *entries, int entryCount) {
+int readSymbolEntries64(FILE *file, long offset, struct SymbolEntry64 *entries, int entryCount) {
     if (fseek(file, offset, SEEK_SET)) {
         fprintf(stderr, "Unable to set file position at %lu\n", offset);
         return 1;
     }
 
     for (int entryIndex = 0; entryIndex < entryCount; entryIndex++) {
-        if (parseDynamicSymbolEntry(file, &entries[entryIndex])) {
+        if (parseSymbolEntry64(file, &entries[entryIndex])) {
             return 1;
         }
     }
@@ -850,7 +718,7 @@ int readProgramAndSectionEntries(FILE *file, FileDetails *fileDetails) {
 
         fileDetails->symbolEntries = dynSymAllocatedMemory;
         fileDetails->symbolStringTable = dynSymAllocatedMemory + (sizeof(struct SymbolEntry64) * symbolCount);
-        if ((result = readDynamicSymbolEntries(file, dynSymSection->offset, fileDetails->symbolEntries, symbolCount)) || (result = readStringTable(file, dynStrSection, fileDetails->symbolStringTable))) {
+        if ((result = readSymbolEntries64(file, dynSymSection->offset, fileDetails->symbolEntries, symbolCount)) || (result = readStringTable(file, dynStrSection, fileDetails->symbolStringTable))) {
             return result;
         }
     }
@@ -924,7 +792,7 @@ int readProgramAndSectionEntries(FILE *file, FileDetails *fileDetails) {
         fileDetails->symbolTabEntries = symbolEntries;
         fileDetails->symbolTabStringTable = symbolStringTable;
 
-        if ((result = readDynamicSymbolEntries(file, symTabSection->offset, symbolEntries, symbolCount)) || (result = readStringTable(file, strTabSection, symbolStringTable))) {
+        if ((result = readSymbolEntries64(file, symTabSection->offset, symbolEntries, symbolCount)) || (result = readStringTable(file, strTabSection, symbolStringTable))) {
             return result;
         }
     }
